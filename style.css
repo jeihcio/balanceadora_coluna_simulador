@@ -341,3 +341,33 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 .weight-list li button:hover{color:var(--red);}
 
 .footer-note{text-align:center;color:var(--text-muted);font-size:.76rem;padding:4px 8px;}
+
+/* ---------- guia didático: onde colocar o chumbo ---------- */
+.guide-panel{
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);
+  padding:14px;display:flex;flex-direction:column;gap:10px;
+}
+.guide-title{
+  font-family:"IBM Plex Sans Condensed",sans-serif;font-size:.82rem;text-transform:uppercase;
+  letter-spacing:.05em;color:var(--text-muted);margin:0;
+}
+.guide-body{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;}
+.guide-clock{width:150px;flex:0 0 150px;height:auto;}
+.guide-face{fill:var(--surface);stroke:var(--border);stroke-width:2;}
+.guide-hub{font-size:11px;fill:var(--metal-dark);}
+.guide-tick-line{stroke:var(--border);stroke-width:2;}
+.guide-tick-text{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;fill:var(--text-muted);}
+.guide-rotate-label{font-family:"IBM Plex Sans Condensed",sans-serif;font-size:8.5px;font-weight:600;fill:var(--text-muted);}
+
+.guide-marker-line{stroke-width:2;stroke-linecap:round;}
+.guide-marker-internal .guide-marker-line{stroke:var(--accent-blue);}
+.guide-marker-external .guide-marker-line{stroke:var(--accent-orange);}
+.guide-marker-dot{stroke:var(--black-part);stroke-width:1.5;}
+.guide-marker-internal .guide-marker-dot{fill:var(--accent-blue);}
+.guide-marker-external .guide-marker-dot{fill:var(--accent-orange);}
+
+.guide-text{flex:1 1 200px;min-width:0;display:flex;flex-direction:column;gap:8px;}
+.guide-line{margin:0;font-size:.82rem;line-height:1.4;padding:6px 9px;border-radius:7px;background:var(--surface);border-left:3px solid var(--metal);}
+.guide-line-internal{border-left-color:var(--accent-blue);}
+.guide-line-external{border-left-color:var(--accent-orange);}
+.guide-legend{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:.74rem;color:var(--text-muted);line-height:1.4;}

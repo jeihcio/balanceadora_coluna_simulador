@@ -6,22 +6,31 @@
   /* ================================================================
      CONSTANTES
      ================================================================ */
-  var MASS_MIN = 5, MASS_MAX = 80, MASS_STEP = 5;
+  var MASS_STEP = 5;                 // toda massa (desbalanceamento e chumbos) é múltiplo de 5
+  var UNBALANCE_MIN = 10, UNBALANCE_MAX = 80; // faixa do desbalanceamento sorteado (múltiplos de 5)
+  var WEIGHT_VALUES = [5, 10, 20, 25]; // únicos valores de chumbo disponíveis na máquina
   var A_MIN = 50, A_MAX = 300;
   var B_MIN = 50, B_MAX = 300;
   var CONTACT_TOL = 5;      // mm/px (escala 1:1) para considerar "encostou"
+  var PLANE_LABEL_TIGHT_GAP = 90; // abaixo disso (px), os rótulos INTERNO/EXTERNO abrem para fora p/ não colidir
   var MOVE_STEP_DEG = 5;    // incremento dos botões de mover chumbo
   var FLANGE_X = 190;       // referência fixa da máquina (início da medida A)
   var WHEEL_CY = 335;       // altura comum: régua A, perfil lateral e centro da roda de frente
   var RULER_B_Y = 455;      // altura da régua B (embaixo da roda)
   var FRONT_CX = 430, FRONT_CY = 335; // centro fixo da roda quando vista de frente
+  var GUIDE_CX = 85, GUIDE_CY = 80, GUIDE_R = 56; // relógio didático (guia de posicionamento)
 
   var WHEEL_PRESETS = [
-    { id: 'compact', label: 'Popular (aro 13"–14")', diameters: [13, 14] },
-    { id: 'sedan', label: 'Sedã / hatch (aro 15"–16")', diameters: [15, 16] },
-    { id: 'suv', label: 'SUV / picape (aro 17"–18")', diameters: [17, 18] },
-    { id: 'sport', label: 'Esportivo (aro 19"–20")', diameters: [19, 20] },
-    { id: 'premium', label: 'Premium (aro 21"–22")', diameters: [21, 22] }
+    { id: 'aro13', label: 'Aro 13"', diameters: [13] },
+    { id: 'aro14', label: 'Aro 14"', diameters: [14] },
+    { id: 'aro15', label: 'Aro 15"', diameters: [15] },
+    { id: 'aro16', label: 'Aro 16"', diameters: [16] },
+    { id: 'aro17', label: 'Aro 17"', diameters: [17] },
+    { id: 'aro18', label: 'Aro 18"', diameters: [18] },
+    { id: 'aro19', label: 'Aro 19"', diameters: [19] },
+    { id: 'aro20', label: 'Aro 20"', diameters: [20] },
+    { id: 'aro21', label: 'Aro 21"', diameters: [21] },
+    { id: 'aro22', label: 'Aro 22"', diameters: [22] }
   ];
 
   /* ================================================================
@@ -30,7 +39,7 @@
   var state = {
     mode: 'sim',
     wheelView: 'side',
-    tolerance: 5,
+    tolerance: 15, // tolerância padrão = soma dos dois planos
 
     handleA_x: FLANGE_X + 20,
     handleBIn_x: FLANGE_X + 10,
@@ -78,6 +87,11 @@
     return { mass: mass, angle: angle };
   }
 
+  // arredonda para o múltiplo de "step" mais próximo (0 continua 0)
+  function roundToStep(value, step) {
+    return Math.round(value / step) * step;
+  }
+
   // soma vetorial de todos os chumbos de um plano
   function sumWeights(list) {
     var acc = { x: 0, y: 0 };
@@ -88,10 +102,14 @@
   }
 
   // desbalanceamento restante de um plano = alvo - soma dos chumbos colocados
+  // a leitura da máquina é sempre múltiplo de 5 g (só existe chumbo nesses
+  // valores, então não faz sentido exibir uma leitura "quebrada")
   function computeRemaining(plane) {
     var target = toVector(state.unbalance[plane].mass, state.unbalance[plane].angle);
     var placed = sumWeights(state.weights[plane]);
-    return fromVector(subVec(target, placed));
+    var result = fromVector(subVec(target, placed));
+    result.mass = roundToStep(result.mass, MASS_STEP);
+    return result;
   }
 
   /* ================================================================
@@ -154,7 +172,9 @@
       'btnGirar', 'miniStatus', 'statusLed',
       'display', 'displayTitle', 'dispMassInt', 'dispAngleInt', 'dispMassExt', 'dispAngleExt',
       'feedback', 'inputTolerance',
-      'stepValInt', 'stepValExt', 'listInternal', 'listExternal'
+      'stepValInt', 'stepValExt', 'listInternal', 'listExternal',
+      'guideTicks', 'guideMarkerInternal', 'guideMarkerExternal',
+      'guideTextInternal', 'guideTextExternal'
     ].forEach(function (id) { el[id] = q(id); });
   }
 
@@ -217,6 +237,82 @@
     el.refPointer.innerHTML =
       '<polygon points="' + (top.x - 8) + ',' + (top.y - 16) + ' ' + (top.x + 8) + ',' + (top.y - 16) + ' ' + top.x + ',' + (top.y - 4) + '"></polygon>' +
       '<text x="' + top.x + '" y="' + (top.y - 20) + '" text-anchor="middle">REF 0°</text>';
+  }
+
+  /* ================================================================
+     RELÓGIO DIDÁTICO (guia de posicionamento do chumbo)
+     Reaproveita a mesma convenção da roda de frente: 12h = REF (0°, topo),
+     ângulos crescendo no sentido horário (12h -> 3h -> 6h -> 9h).
+     ================================================================ */
+  function buildGuideTicks() {
+    var g = el.guideTicks;
+    g.innerHTML = '';
+    var hours = [{ h: 12, a: 0 }, { h: 3, a: 90 }, { h: 6, a: 180 }, { h: 9, a: 270 }];
+    hours.forEach(function (tick) {
+      var p1 = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R - 8, tick.a);
+      var p2 = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R + 2, tick.a);
+      var pLabel = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R + 14, tick.a);
+      var line = document.createElementNS(SVG_NS, 'line');
+      line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y);
+      line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);
+      line.setAttribute('class', 'guide-tick-line');
+      g.appendChild(line);
+      var t = document.createElementNS(SVG_NS, 'text');
+      t.setAttribute('x', pLabel.x); t.setAttribute('y', pLabel.y);
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('dominant-baseline', 'middle');
+      t.setAttribute('class', 'guide-tick-text');
+      t.textContent = tick.h + 'h';
+      g.appendChild(t);
+    });
+  }
+
+  // converte um ângulo (0-359°, 0 no topo/12h, sentido horário) numa frase tipo
+  // "no 6h" ou "entre 7h e 8h", para descrever a posição de forma bem simples
+  function angleToClockPhrase(angleDeg) {
+    var hourFloat = (angleDeg / 30) % 12; // 360°/12h = 30° por hora
+    var nearest = Math.round(hourFloat) % 12;
+    var frac = hourFloat - Math.floor(hourFloat);
+    var closeToExact = frac < 0.15 || frac > 0.85;
+    if (closeToExact) {
+      return 'perto do ' + clockLabel(nearest) + 'h';
+    }
+    var lower = Math.floor(hourFloat) % 12;
+    var upper = Math.ceil(hourFloat) % 12;
+    return 'entre ' + clockLabel(lower) + 'h e ' + clockLabel(upper) + 'h';
+  }
+
+  function clockLabel(h) { return h === 0 ? 12 : h; }
+
+  // atualiza o relógio didático + o texto de cada plano com a posição exata
+  // (mesmo alvo calculado por computeRemaining, só que traduzido em palavras)
+  function renderGuide() {
+    renderGuidePlane('internal', el.guideMarkerInternal, el.guideTextInternal);
+    renderGuidePlane('external', el.guideMarkerExternal, el.guideTextExternal);
+  }
+
+  function renderGuidePlane(plane, markerEl, textEl) {
+    var label = planeLabel(plane);
+    if (!state.hasSpun) {
+      markerEl.innerHTML = '';
+      textEl.textContent = 'Gire a roda para descobrir onde colocar o chumbo ' + label + '.';
+      return;
+    }
+    var rem = computeRemaining(plane);
+    if (rem.mass === 0) {
+      markerEl.innerHTML = '';
+      textEl.textContent = 'Plano ' + label + ' balanceado — nenhum chumbo a mais é necessário aqui.';
+      return;
+    }
+    var p = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R, rem.angle);
+    var pLine = polarXY(GUIDE_CX, GUIDE_CY, 10, rem.angle);
+    markerEl.innerHTML =
+      '<line x1="' + pLine.x + '" y1="' + pLine.y + '" x2="' + p.x + '" y2="' + p.y + '" class="guide-marker-line"></line>' +
+      '<circle cx="' + p.x + '" cy="' + p.y + '" r="7" class="guide-marker-dot"></circle>';
+    textEl.innerHTML =
+      '<strong>' + (plane === 'internal' ? 'Interno' : 'Externo') + ':</strong> faltam ' + rem.mass + ' g, ' +
+      angleToClockPhrase(rem.angle) + ' (' + Math.round(rem.angle) + '°). Adicione ou mova o chumbo até a bolinha ' +
+      (plane === 'internal' ? 'azul' : 'laranja') + ' no relógio.';
   }
 
   var DIAMETERS_IN = [13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
@@ -313,8 +409,16 @@
     el.planeInternalLine.setAttribute('x2', rim.internalX);
     el.planeExternalLine.setAttribute('x1', rim.externalX);
     el.planeExternalLine.setAttribute('x2', rim.externalX);
-    el.planeInternalLabel.setAttribute('x', rim.internalX);
-    el.planeExternalLabel.setAttribute('x', rim.externalX);
+
+    // planos podem ficar próximos (roda estreita): se os rótulos centralizados
+    // fossem colidir, cada um "abre" para o lado de fora da própria linha
+    // em vez de ficar centralizado sobre ela.
+    var planeGap = rim.externalX - rim.internalX;
+    var labelsTight = planeGap < PLANE_LABEL_TIGHT_GAP;
+    el.planeInternalLabel.setAttribute('text-anchor', labelsTight ? 'end' : 'middle');
+    el.planeInternalLabel.setAttribute('x', labelsTight ? rim.internalX - 6 : rim.internalX);
+    el.planeExternalLabel.setAttribute('text-anchor', labelsTight ? 'start' : 'middle');
+    el.planeExternalLabel.setAttribute('x', labelsTight ? rim.externalX + 6 : rim.externalX);
 
     // régua A: sai da flange (referência fixa) até a roda
     var aVal = state.handleA_x - FLANGE_X;
@@ -373,6 +477,7 @@
     renderWeightGroup('external', el.weightsExternal, state.geom.outerR);
     renderWeightLists();
     renderTargetGhosts();
+    renderGuide();
   }
 
   function renderWeightGroup(plane, container, radius) {
@@ -422,6 +527,7 @@
       g.setAttribute('transform', 'translate(' + p.x + ',' + p.y + ')');
       renderWeightLists();
       renderTargetGhosts();
+      renderGuide();
     });
     function end(e) {
       if (!dragging) return;
@@ -453,7 +559,7 @@
     el.targetGhosts.innerHTML = '';
     ['internal', 'external'].forEach(function (plane) {
       var rem = computeRemaining(plane);
-      if (rem.mass < 0.5) return;
+      if (rem.mass === 0) return;
       var radius = plane === 'internal' ? state.geom.innerR : state.geom.outerR;
       var p0 = polarXY(state.geom.cx, state.geom.cy, radius, rem.angle);
       var p1 = polarXY(state.geom.cx, state.geom.cy, radius + 30, rem.angle);
@@ -613,19 +719,20 @@
     state.lastReading = { internal: curInt, external: curExt };
     state.hasSpun = true;
     renderTargetGhosts();
+    renderGuide();
   }
 
   function updateDisplay(intR, extR) {
     var tol = state.tolerance;
-    var balancedInt = intR.mass <= tol;
-    var balancedExt = extR.mass <= tol;
+    var total = intR.mass + extR.mass; // tolerância é sobre a soma dos dois planos, não cada um isolado
+    var balanced = total <= tol;
 
-    el.dispMassInt.textContent = Math.round(intR.mass) + ' g';
-    el.dispAngleInt.textContent = balancedInt ? '—' : Math.round(intR.angle) + '°';
-    el.dispMassExt.textContent = Math.round(extR.mass) + ' g';
-    el.dispAngleExt.textContent = balancedExt ? '—' : Math.round(extR.angle) + '°';
+    el.dispMassInt.textContent = intR.mass + ' g';
+    el.dispAngleInt.textContent = intR.mass === 0 ? '—' : Math.round(intR.angle) + '°';
+    el.dispMassExt.textContent = extR.mass + ' g';
+    el.dispAngleExt.textContent = extR.mass === 0 ? '—' : Math.round(extR.angle) + '°';
 
-    if (balancedInt && balancedExt) {
+    if (balanced) {
       el.displayTitle.textContent = 'RODA OK — BALANCEADA';
       el.display.classList.add('is-balanced');
     } else {
@@ -636,18 +743,18 @@
 
   function updateFeedback(prevInt, curInt, prevExt, curExt) {
     var tol = state.tolerance;
-    var balancedInt = curInt.mass <= tol;
-    var balancedExt = curExt.mass <= tol;
+    var total = curInt.mass + curExt.mass;
+    var balanced = total <= tol;
 
-    if (balancedInt && balancedExt) {
-      setFeedback('Roda balanceada! Os planos interno e externo estão dentro da tolerância de ' + tol + ' g.', 'good');
+    if (balanced) {
+      setFeedback('Roda balanceada! A soma dos dois planos (' + total + ' g) está dentro da tolerância de ' + tol + ' g.', 'good');
       return;
     }
 
     var parts = [];
     var pairs = [
-      { plane: 'internal', prev: prevInt, cur: curInt, ok: balancedInt },
-      { plane: 'external', prev: prevExt, cur: curExt, ok: balancedExt }
+      { plane: 'internal', prev: prevInt, cur: curInt, ok: curInt.mass === 0 },
+      { plane: 'external', prev: prevExt, cur: curExt, ok: curExt.mass === 0 }
     ];
     var worsened = false;
     pairs.forEach(function (p) {
@@ -680,9 +787,16 @@
      ================================================================ */
   function generateUnbalance() {
     return {
-      internal: { mass: randInt(10, MASS_MAX), angle: randInt(0, 359) },
-      external: { mass: randInt(10, MASS_MAX), angle: randInt(0, 359) }
+      internal: { mass: randMassMultiple(), angle: randInt(0, 359) },
+      external: { mass: randMassMultiple(), angle: randInt(0, 359) }
     };
+  }
+
+  // sorteia um desbalanceamento sempre múltiplo de 5 (nunca zero: sempre há algo para corrigir)
+  function randMassMultiple() {
+    var steps = UNBALANCE_MAX / MASS_STEP;
+    var minSteps = UNBALANCE_MIN / MASS_STEP;
+    return MASS_STEP * randInt(minSteps, steps);
   }
 
   function pickPreset() {
@@ -832,18 +946,21 @@
 
     el.inputTolerance.addEventListener('input', function () {
       var v = parseInt(el.inputTolerance.value, 10);
-      if (isNaN(v)) v = 5;
-      state.tolerance = clamp(v, 1, 20);
+      if (isNaN(v)) v = 15;
+      state.tolerance = clamp(v, 5, 40);
       if (state.hasSpun) updateDisplay(state.lastReading.internal, state.lastReading.external);
     });
 
+    // o próximo chumbo só pode ser um dos valores reais disponíveis na máquina (5/10/20/25 g)
     Array.prototype.forEach.call(document.querySelectorAll('.stepper-btn'), function (btn) {
       btn.addEventListener('click', function () {
         var plane = btn.getAttribute('data-step-plane');
         var dir = parseInt(btn.getAttribute('data-step-dir'), 10);
-        var v = clamp(state.pendingMass[plane] + dir * MASS_STEP, MASS_MIN, MASS_MAX);
-        state.pendingMass[plane] = v;
-        (plane === 'internal' ? el.stepValInt : el.stepValExt).textContent = v + ' g';
+        var idx = WEIGHT_VALUES.indexOf(state.pendingMass[plane]);
+        if (idx === -1) idx = 0;
+        idx = clamp(idx + dir, 0, WEIGHT_VALUES.length - 1);
+        state.pendingMass[plane] = WEIGHT_VALUES[idx];
+        (plane === 'internal' ? el.stepValInt : el.stepValExt).textContent = WEIGHT_VALUES[idx] + ' g';
       });
     });
 
@@ -869,6 +986,7 @@
     buildRulerTicks(el.rulerBTicks, FLANGE_X, RULER_B_Y, 1);
     buildAngleTicks();
     buildRefPointer();
+    buildGuideTicks();
     updateWheelGeometry();
     setWheelView('side');
     el.machineSvg.setAttribute('data-wheel-view', 'side');

@@ -92,8 +92,8 @@
             <!-- planos -->
             <line id="planeInternalLine" x1="260" y1="255" x2="260" y2="495" class="plane-line plane-internal" stroke-dasharray="5 4"/>
             <line id="planeExternalLine" x1="360" y1="255" x2="360" y2="495" class="plane-line plane-external" stroke-dasharray="5 4"/>
-            <text id="planeInternalLabel" x="260" y="245" class="label label-plane" text-anchor="middle">PLANO INTERNO</text>
-            <text id="planeExternalLabel" x="360" y="245" class="label label-plane" text-anchor="middle">PLANO EXTERNO</text>
+            <text id="planeInternalLabel" x="260" y="245" class="label label-plane" text-anchor="middle">INTERNO</text>
+            <text id="planeExternalLabel" x="360" y="245" class="label label-plane" text-anchor="middle">EXTERNO</text>
 
             <!-- perfil da roda visto de lado -->
             <rect id="sideRim" x="260" y="290" width="100" height="90" rx="5" class="side-rim"/>
@@ -200,8 +200,8 @@
       <p class="feedback" id="feedback">Meça a roda e clique em GIRAR para iniciar.</p>
 
       <div class="tolerance-row">
-        <label for="inputTolerance">Tolerância de balanceamento</label>
-        <input type="number" id="inputTolerance" min="1" max="20" step="1" value="5">
+        <label for="inputTolerance">Tolerância de balanceamento (soma dos dois planos)</label>
+        <input type="number" id="inputTolerance" min="5" max="40" step="5" value="15">
         <span>g</span>
       </div>
 
@@ -243,10 +243,33 @@
         </div>
       </div>
 
-      <p class="hint" data-hint="balance-vectors">
-        Cada chumbo colocado soma-se vetorialmente ao desbalanceamento do plano. Um chumbo no ângulo certo
-        reduz a leitura; no ângulo errado pode até aumentá-la. Gire a roda novamente para ver o resultado.
-      </p>
+      <div class="guide-panel" aria-labelledby="guideTitle">
+        <h3 id="guideTitle" class="guide-title">Guia rápido — onde colocar o chumbo</h3>
+
+        <div class="guide-body">
+          <svg id="guideClock" class="guide-clock" viewBox="0 0 170 170" role="img"
+               aria-label="Relógio de referência: 12h é a marca de referência da roda (topo); os ângulos crescem no sentido horário, passando por 3h, 6h e 9h">
+            <circle cx="85" cy="80" r="56" class="guide-face"/>
+            <g id="guideTicks"></g>
+            <text x="85" y="80" text-anchor="middle" dominant-baseline="middle" class="guide-hub">◎</text>
+            <g id="guideMarkerExternal" class="guide-marker guide-marker-external"></g>
+            <g id="guideMarkerInternal" class="guide-marker guide-marker-internal"></g>
+            <text x="132" y="45" class="guide-rotate-label guide-rotate-advance">⟳ avançar</text>
+            <text x="38" y="45" class="guide-rotate-label guide-rotate-back" text-anchor="end">recuar ⟲</text>
+          </svg>
+
+          <div class="guide-text">
+            <p class="guide-line guide-line-internal" id="guideTextInternal">Gire a roda para descobrir onde colocar o chumbo interno.</p>
+            <p class="guide-line guide-line-external" id="guideTextExternal">Gire a roda para descobrir onde colocar o chumbo externo.</p>
+            <ul class="guide-legend">
+              <li><strong>12h</strong> = referência da máquina (topo, seta vermelha na roda de frente). Os ângulos crescem no sentido horário: 12h → 3h → 6h → 9h → 12h.</li>
+              <li><strong>Mover ►</strong> avança o chumbo no sentido horário (ângulo aumenta) — use quando o alvo estiver à frente da posição atual.</li>
+              <li><strong>◄ Mover</strong> recua o chumbo no sentido anti-horário (ângulo diminui) — use quando o alvo estiver atrás.</li>
+              <li>Sem chumbo nesse plano ainda? Clique em <strong>+ Chumbo</strong> primeiro, depois use Mover até a bolinha indicada acima.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </section>
 
   </main>
