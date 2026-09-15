@@ -1,0 +1,259 @@
+<title>Balanceadora Didática</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="style.css">
+
+<div class="app" id="app" data-mode="sim">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">⟲</span>
+      <div class="brand-text">
+        <strong>Balanceadora Didática</strong>
+        <small>Simulação 2D de balanceamento de rodas por coluna</small>
+      </div>
+    </div>
+
+    <div class="topbar-controls">
+      <div class="mode-switch" role="group" aria-label="Modo de operação">
+        <button type="button" id="modeLearnBtn" class="mode-btn" aria-pressed="false">Aprendizado</button>
+        <button type="button" id="modeSimBtn" class="mode-btn" aria-pressed="true">Simulação</button>
+      </div>
+      <div class="exercise-group">
+        <label class="sr-only" for="selectPreset">Padrão de roda</label>
+        <select id="selectPreset"></select>
+        <button type="button" id="btnExercicio" class="btn btn-accent">Gerar exercício</button>
+      </div>
+    </div>
+  </header>
+
+  <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
+
+  <main class="layout">
+
+    <!-- ===================== PAINEL PRINCIPAL: MÁQUINA, RODA E MEDIÇÃO ===================== -->
+    <section class="panel panel-machine" aria-labelledby="machineTitle">
+      <h2 id="machineTitle" class="panel-title">Máquina, roda e medição</h2>
+
+      <p class="hint" data-hint="measure-intro">
+        A roda aparece <strong>de lado</strong>, como numa balanceadora real. Arraste a régua <strong>A</strong>
+        (sai da máquina até a roda) e a régua <strong>B</strong> (embaixo da roda) para medir. Ao mexer nos
+        chumbos a roda vira <strong>de frente</strong> automaticamente.
+      </p>
+
+      <figure class="machine-figure">
+        <svg id="machineSvg" viewBox="0 0 960 620" data-wheel-view="side" role="img"
+             aria-label="Ilustração da balanceadora de coluna com a roda montada no eixo, vista de lado ou de frente">
+          <defs>
+            <linearGradient id="colGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="var(--red-light)"/>
+              <stop offset="45%" stop-color="var(--red)"/>
+              <stop offset="100%" stop-color="var(--red-dark)"/>
+            </linearGradient>
+            <radialGradient id="rimGrad" cx="35%" cy="30%" r="75%">
+              <stop offset="0%" stop-color="var(--metal-light)"/>
+              <stop offset="60%" stop-color="var(--metal)"/>
+              <stop offset="100%" stop-color="var(--metal-dark)"/>
+            </radialGradient>
+            <linearGradient id="rimSideGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="var(--metal-light)"/>
+              <stop offset="55%" stop-color="var(--metal)"/>
+              <stop offset="100%" stop-color="var(--metal-dark)"/>
+            </linearGradient>
+          </defs>
+
+          <!-- base -->
+          <ellipse cx="125" cy="598" rx="125" ry="14" class="base-shadow"/>
+          <rect x="25" y="560" width="200" height="30" rx="8" class="base-block"/>
+          <circle cx="55" cy="575" r="6" class="base-bolt"/>
+          <circle cx="195" cy="575" r="6" class="base-bolt"/>
+
+          <!-- coluna -->
+          <rect x="60" y="115" width="90" height="445" rx="14" fill="url(#colGrad)" class="column"/>
+          <rect x="72" y="115" width="10" height="445" rx="5" class="column-highlight"/>
+
+          <!-- painel de controle -->
+          <rect x="15" y="15" width="210" height="100" rx="10" class="control-housing"/>
+          <rect x="30" y="30" width="112" height="52" rx="4" class="control-screen"/>
+          <text x="36" y="50" class="control-screen-text">BAL·2D</text>
+          <text x="36" y="68" class="control-screen-text control-screen-text--sub" id="miniStatus">PRONTA</text>
+          <circle cx="192" cy="38" r="7" class="control-led" id="statusLed"/>
+          <circle cx="208" cy="38" r="9" class="control-knob"/>
+          <rect x="182" y="56" width="34" height="14" rx="4" class="control-btn"/>
+          <rect x="182" y="76" width="34" height="14" rx="4" class="control-btn"/>
+
+          <!-- flange fixa: referência para a medida A -->
+          <rect x="150" y="323" width="40" height="24" rx="4" class="flange-stub"/>
+          <text x="170" y="380" class="label label-ref" text-anchor="middle">REF. MÁQUINA</text>
+
+          <!-- ===================== VISTA LATERAL (padrão, como a máquina real) ===================== -->
+          <g id="wheelSideFlip">
+
+            <!-- planos -->
+            <line id="planeInternalLine" x1="260" y1="255" x2="260" y2="495" class="plane-line plane-internal" stroke-dasharray="5 4"/>
+            <line id="planeExternalLine" x1="360" y1="255" x2="360" y2="495" class="plane-line plane-external" stroke-dasharray="5 4"/>
+            <text id="planeInternalLabel" x="260" y="245" class="label label-plane" text-anchor="middle">PLANO INTERNO</text>
+            <text id="planeExternalLabel" x="360" y="245" class="label label-plane" text-anchor="middle">PLANO EXTERNO</text>
+
+            <!-- perfil da roda visto de lado -->
+            <rect id="sideRim" x="260" y="290" width="100" height="90" rx="5" class="side-rim"/>
+            <rect id="sideRimTread" x="260" y="290" width="100" height="9" class="side-rim-tread"/>
+
+            <!-- régua A: sai da máquina até a roda (desenhada por cima do perfil p/ ficar sempre visível/arrastável) -->
+            <line id="rulerALine" x1="190" y1="335" x2="210" y2="335" class="ruler-line ruler-a-line"/>
+            <g id="rulerATicks"></g>
+            <g id="handleA" class="handle handle-a" tabindex="0" role="slider" aria-label="Régua A: arraste até encostar na roda"
+               aria-valuemin="50" aria-valuemax="300">
+              <polygon points="0,-11 13,0 0,11" class="handle-shape"/>
+              <line x1="0" y1="-17" x2="0" y2="17" class="handle-stem"/>
+            </g>
+            <text id="labelA" x="200" y="283" class="label label-value" text-anchor="middle">A = -- mm</text>
+
+            <!-- régua B: embaixo da roda -->
+            <g id="rulerBTicks"></g>
+            <line id="calipersLine" x1="270" y1="455" x2="300" y2="455" class="ruler-line ruler-b-line"/>
+            <g id="handleBIn" class="handle handle-b" tabindex="0" role="slider" aria-label="Ponta interna da régua B"
+               aria-valuemin="50" aria-valuemax="300">
+              <polygon points="0,-10 -12,3 12,3" class="handle-shape"/>
+              <line x1="0" y1="-16" x2="0" y2="18" class="handle-stem"/>
+            </g>
+            <g id="handleBOut" class="handle handle-b" tabindex="0" role="slider" aria-label="Ponta externa da régua B"
+               aria-valuemin="50" aria-valuemax="300">
+              <polygon points="0,-10 -12,3 12,3" class="handle-shape"/>
+              <line x1="0" y1="-16" x2="0" y2="18" class="handle-stem"/>
+            </g>
+            <text id="labelB" x="285" y="514" class="label label-value" text-anchor="middle">B = -- mm</text>
+          </g>
+
+          <!-- ===================== VISTA FRONTAL (ao mexer nos chumbos) ===================== -->
+          <g id="wheelFrontFlip">
+            <g id="angleTicks"></g>
+            <g id="wheelRotor">
+              <circle id="tireCircle" cx="430" cy="335" r="190" class="tire"/>
+              <circle id="rimCircle" cx="430" cy="335" r="150" fill="url(#rimGrad)" class="rim"/>
+              <g id="spokes"></g>
+              <circle id="outerPlaneRing" cx="430" cy="335" r="126" class="plane-ring plane-ring-external"/>
+              <circle id="innerPlaneRing" cx="430" cy="335" r="78" class="plane-ring plane-ring-internal"/>
+              <circle cx="430" cy="335" r="16" class="hub-cap"/>
+              <g id="valveStem" class="valve-stem"></g>
+              <g id="targetGhosts"></g>
+              <g id="weightsInternal"></g>
+              <g id="weightsExternal"></g>
+            </g>
+            <g id="refPointer" class="ref-pointer"></g>
+          </g>
+        </svg>
+      </figure>
+
+      <div class="view-toggle-row">
+        <button type="button" id="btnViewToggle" class="btn btn-outline btn-small">Ver roda de frente</button>
+        <span class="view-status" id="viewStatus">Vista lateral (mesma posição de montagem de uma máquina real)</span>
+      </div>
+
+      <div class="measure-alt">
+        <label class="numfield">
+          <span>A (mm)</span>
+          <input type="number" id="inputA" min="50" max="300" step="1">
+        </label>
+        <label class="numfield">
+          <span>B (mm)</span>
+          <input type="number" id="inputB" min="50" max="300" step="1">
+        </label>
+        <label class="numfield" for="selectD">
+          <span>Diâmetro (D)</span>
+          <select id="selectD"></select>
+        </label>
+        <div class="numfield">
+          <span>&nbsp;</span>
+          <p class="diameter-readout" id="labelD">D = 17" (431,8 mm)</p>
+        </div>
+      </div>
+
+      <button type="button" id="btnGirar" class="btn btn-giant">GIRAR / BALANCEAR</button>
+
+      <p class="hint" data-hint="machine-spin">
+        Ao girar, a máquina mede o desbalanceamento atual dos planos interno e externo, considerando todos os
+        chumbos já instalados.
+      </p>
+    </section>
+
+    <!-- ===================== PAINEL DIREITO: BALANCEAMENTO ===================== -->
+    <section class="panel panel-balance" aria-labelledby="balanceTitle">
+      <h2 id="balanceTitle" class="panel-title">Balanceamento</h2>
+
+      <div class="display" id="display">
+        <p class="display-title" id="displayTitle">AGUARDANDO</p>
+        <div class="display-grid">
+          <div class="display-col">
+            <span class="display-label">INTERNO</span>
+            <span class="display-mass" id="dispMassInt">-- g</span>
+            <span class="display-angle" id="dispAngleInt">--°</span>
+          </div>
+          <div class="display-col">
+            <span class="display-label">EXTERNO</span>
+            <span class="display-mass" id="dispMassExt">-- g</span>
+            <span class="display-angle" id="dispAngleExt">--°</span>
+          </div>
+        </div>
+      </div>
+
+      <p class="feedback" id="feedback">Meça a roda e clique em GIRAR para iniciar.</p>
+
+      <div class="tolerance-row">
+        <label for="inputTolerance">Tolerância de balanceamento</label>
+        <input type="number" id="inputTolerance" min="1" max="20" step="1" value="5">
+        <span>g</span>
+      </div>
+
+      <div class="weight-panels">
+        <div class="weight-panel" data-plane="internal">
+          <h3>Chumbo interno</h3>
+          <div class="stepper">
+            <button type="button" class="stepper-btn" data-step-plane="internal" data-step-dir="-1" aria-label="Diminuir massa do próximo chumbo interno">−</button>
+            <span class="stepper-value" id="stepValInt">5 g</span>
+            <button type="button" class="stepper-btn" data-step-plane="internal" data-step-dir="1" aria-label="Aumentar massa do próximo chumbo interno">+</button>
+          </div>
+          <div class="weight-actions">
+            <button type="button" class="btn btn-weight" data-action="add" data-plane="internal">+ Chumbo</button>
+            <button type="button" class="btn btn-weight" data-action="remove" data-plane="internal">− Chumbo</button>
+          </div>
+          <div class="weight-actions">
+            <button type="button" class="btn btn-move" data-action="move" data-plane="internal" data-dir="-1" aria-label="Mover chumbo interno no sentido anti-horário">◄ Mover</button>
+            <button type="button" class="btn btn-move" data-action="move" data-plane="internal" data-dir="1" aria-label="Mover chumbo interno no sentido horário">Mover ►</button>
+          </div>
+          <ul class="weight-list" id="listInternal"></ul>
+        </div>
+
+        <div class="weight-panel" data-plane="external">
+          <h3>Chumbo externo</h3>
+          <div class="stepper">
+            <button type="button" class="stepper-btn" data-step-plane="external" data-step-dir="-1" aria-label="Diminuir massa do próximo chumbo externo">−</button>
+            <span class="stepper-value" id="stepValExt">5 g</span>
+            <button type="button" class="stepper-btn" data-step-plane="external" data-step-dir="1" aria-label="Aumentar massa do próximo chumbo externo">+</button>
+          </div>
+          <div class="weight-actions">
+            <button type="button" class="btn btn-weight" data-action="add" data-plane="external">+ Chumbo</button>
+            <button type="button" class="btn btn-weight" data-action="remove" data-plane="external">− Chumbo</button>
+          </div>
+          <div class="weight-actions">
+            <button type="button" class="btn btn-move" data-action="move" data-plane="external" data-dir="-1" aria-label="Mover chumbo externo no sentido anti-horário">◄ Mover</button>
+            <button type="button" class="btn btn-move" data-action="move" data-plane="external" data-dir="1" aria-label="Mover chumbo externo no sentido horário">Mover ►</button>
+          </div>
+          <ul class="weight-list" id="listExternal"></ul>
+        </div>
+      </div>
+
+      <p class="hint" data-hint="balance-vectors">
+        Cada chumbo colocado soma-se vetorialmente ao desbalanceamento do plano. Um chumbo no ângulo certo
+        reduz a leitura; no ângulo errado pode até aumentá-la. Gire a roda novamente para ver o resultado.
+      </p>
+    </section>
+
+  </main>
+
+  <footer class="footer-note">
+    Simulação didática — não reproduz o algoritmo interno de nenhuma balanceadora comercial.
+  </footer>
+</div>
+
+<script src="script.js"></script>
