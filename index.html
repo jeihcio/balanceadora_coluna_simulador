@@ -1,9 +1,23 @@
-<title>Balanceadora Didática</title>
+<title>Balanceadora Didática — Simulador de Balanceamento de Coluna</title>
+<meta name="description" content="Simulador 2D de balanceadora de coluna: meça a roda, gire, leia o desbalanceamento e coloque o chumbo no lugar certo — direto no navegador, sem instalar nada.">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Balanceadora Didática — Simulador de Balanceamento de Coluna">
+<meta property="og:description" content="Meça, gire e balanceie uma roda 2D no navegador e aprenda a lógica de uma balanceadora de coluna, sem precisar de uma máquina de verdade.">
+<meta property="og:image" content="og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Balanceadora Didática — Simulador de Balanceamento de Coluna">
+<meta name="twitter:description" content="Meça, gire e balanceie uma roda 2D no navegador e aprenda a lógica de uma balanceadora de coluna, sem precisar de uma máquina de verdade.">
+<meta name="twitter:image" content="og-image.png">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="style.css">
 
-<div class="app" id="app" data-mode="sim">
+<div class="app" id="app" data-mode="learn">
 
   <header class="topbar">
     <div class="brand">
@@ -15,9 +29,10 @@
     </div>
 
     <div class="topbar-controls">
-      <div class="mode-switch" role="group" aria-label="Modo de operação">
-        <button type="button" id="modeLearnBtn" class="mode-btn" aria-pressed="false">Aprendizado</button>
-        <button type="button" id="modeSimBtn" class="mode-btn" aria-pressed="true">Simulação</button>
+      <div class="tolerance-row">
+        <label for="inputTolerance">Tolerância de balanceamento (soma dos dois planos)</label>
+        <input type="number" id="inputTolerance" min="0" max="40" step="5" value="15">
+        <span>g</span>
       </div>
       <div class="exercise-group">
         <label class="sr-only" for="selectPreset">Padrão de roda</label>
@@ -43,11 +58,6 @@
 
       <figure class="machine-figure">
         <div class="machine-readout" id="machineReadout">
-          <div class="readout-head">
-            <span class="readout-brand">BAL·2D</span>
-            <span class="readout-led" id="statusLed" aria-hidden="true"></span>
-            <span class="readout-status" id="miniStatus">PRONTA</span>
-          </div>
           <div class="readout-grid">
             <div class="readout-col">
               <span class="readout-label">INTERNO</span>
@@ -93,6 +103,10 @@
           <rect x="60" y="115" width="90" height="445" rx="14" fill="url(#colGrad)" class="column"/>
           <rect x="72" y="115" width="10" height="445" rx="5" class="column-highlight"/>
 
+          <!-- painel de controle (quadrado preto em cima da coluna vermelha) -->
+          <rect x="15" y="15" width="210" height="100" rx="10" class="control-housing"/>
+          <rect x="24" y="24" width="192" height="82" rx="4" class="control-screen"/>
+
           <!-- flange fixa: referência para a medida A -->
           <rect x="150" y="323" width="40" height="24" rx="4" class="flange-stub"/>
           <text x="170" y="380" class="label label-ref" text-anchor="middle">REF. MÁQUINA</text>
@@ -115,7 +129,7 @@
             <g id="rulerATicks"></g>
             <g id="handleA" class="handle handle-a" tabindex="0" role="slider" aria-label="Régua A: arraste até encostar na roda"
                aria-valuemin="50" aria-valuemax="300">
-              <polygon points="0,-11 13,0 0,11" class="handle-shape"/>
+              <polygon points="-13,-11 -13,11 0,0" class="handle-shape"/>
               <line x1="0" y1="-17" x2="0" y2="17" class="handle-stem"/>
             </g>
             <text id="labelA" x="200" y="283" class="label label-value" text-anchor="middle">A = -- mm</text>
@@ -143,8 +157,6 @@
               <circle id="tireCircle" cx="430" cy="335" r="190" class="tire"/>
               <circle id="rimCircle" cx="430" cy="335" r="150" fill="url(#rimGrad)" class="rim"/>
               <g id="spokes"></g>
-              <g id="fieldZonesInternal" class="field-zones"></g>
-              <g id="fieldZonesExternal" class="field-zones"></g>
               <circle id="outerPlaneRing" cx="430" cy="335" r="126" class="plane-ring plane-ring-external"/>
               <circle id="innerPlaneRing" cx="430" cy="335" r="78" class="plane-ring plane-ring-internal"/>
               <circle cx="430" cy="335" r="16" class="hub-cap"/>
@@ -153,6 +165,9 @@
               <g id="weightsInternal"></g>
               <g id="weightsExternal"></g>
             </g>
+            <!-- diagrama de campo fixo (leve/mover/pesado): NÃO gira com o pneu,
+                 fica ancorado na referência fixa da máquina (90° = topo = REF) -->
+            <g id="fieldZonesMachine" class="field-zones"></g>
             <g id="refPointer" class="ref-pointer"></g>
           </g>
         </svg>
@@ -169,10 +184,10 @@
         ponto de referência (12h) para colocar o chumbo.
       </p>
 
-      <div class="zone-legend" aria-hidden="true">
-        <span><span class="zone-swatch zone-swatch-leve"></span>Leve — perto do chumbo</span>
-        <span><span class="zone-swatch zone-swatch-mover"></span>Mover — dos lados</span>
-        <span><span class="zone-swatch zone-swatch-pesado"></span>Pesado — lado oposto</span>
+      <div class="zone-legend">
+        <span><span class="zone-swatch zone-swatch-leve"></span>Leve (12h) — troque por um chumbo mais pesado</span>
+        <span><span class="zone-swatch zone-swatch-mover"></span>Mover — gire a roda na direção da seta</span>
+        <span><span class="zone-swatch zone-swatch-pesado"></span>Pesado (6h) — troque por um chumbo mais leve</span>
       </div>
 
       <div class="measure-alt">
@@ -199,21 +214,13 @@
     <section class="panel panel-balance" aria-labelledby="balanceTitle">
       <h2 id="balanceTitle" class="panel-title">Balanceamento</h2>
 
-      <div class="panel-action">
-        <button type="button" id="btnGirar" class="btn btn-giant">GIRAR / BALANCEAR</button>
-        <p class="hint" data-hint="machine-spin">
-          Ao girar, a máquina mede o desbalanceamento atual dos planos interno e externo, considerando todos os
-          chumbos já instalados.
-        </p>
-      </div>
+      <button type="button" id="btnGirar" class="btn btn-giant">GIRAR / BALANCEAR</button>
+      <p class="hint" data-hint="machine-spin">
+        Ao girar, a máquina mede o desbalanceamento atual dos planos interno e externo, considerando todos os
+        chumbos já instalados.
+      </p>
 
       <p class="feedback" id="feedback">Meça a roda e clique em GIRAR para iniciar.</p>
-
-      <div class="tolerance-row">
-        <label for="inputTolerance">Tolerância de balanceamento (soma dos dois planos)</label>
-        <input type="number" id="inputTolerance" min="5" max="40" step="5" value="15">
-        <span>g</span>
-      </div>
 
       <div class="weight-panels">
         <div class="weight-panel" data-plane="internal">
@@ -285,6 +292,15 @@
   <footer class="footer-note">
     Simulação didática — não reproduz o algoritmo interno de nenhuma balanceadora comercial.
   </footer>
+
+  <div class="modal-overlay" id="balancedModal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="balancedModalTitle" aria-describedby="balancedModalMsg">
+      <div class="modal-icon" aria-hidden="true">🎉</div>
+      <h2 id="balancedModalTitle" class="modal-title">Parabéns!</h2>
+      <p id="balancedModalMsg" class="modal-message">Roda balanceada!</p>
+      <button type="button" id="btnBalancedOk" class="btn btn-accent modal-ok">OK</button>
+    </div>
+  </div>
 </div>
 
 <script src="script.js"></script>

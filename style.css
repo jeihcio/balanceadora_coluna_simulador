@@ -25,9 +25,9 @@
   --accent-amber:#cf9200;
   --focus:#2f6fed;
 
-  --zone-leve:rgba(59,130,246,.16);
-  --zone-mover:rgba(245,158,11,.16);
-  --zone-pesado:rgba(220,38,38,.16);
+  --zone-leve:rgba(59,130,246,.32);
+  --zone-mover:rgba(245,158,11,.28);
+  --zone-pesado:rgba(220,38,38,.30);
 
   --shadow:0 10px 26px rgba(30,25,20,.10);
   --radius-lg:16px;
@@ -102,14 +102,6 @@ h1,h2,h3{margin:0;}
 
 .topbar-controls{display:flex;flex-wrap:wrap;align-items:center;gap:14px;}
 
-.mode-switch{display:inline-flex;border:1px solid var(--border);border-radius:999px;overflow:hidden;background:var(--surface-2);}
-.mode-btn{
-  border:none;background:transparent;padding:8px 16px;font-family:"IBM Plex Sans Condensed",sans-serif;
-  font-weight:600;letter-spacing:.02em;color:var(--text-muted);cursor:pointer;font-size:.85rem;
-}
-.mode-btn[aria-pressed="true"]{background:var(--red);color:#fff;}
-.mode-btn:hover:not([aria-pressed="true"]){color:var(--text);}
-
 .exercise-group{display:flex;align-items:center;gap:8px;}
 .exercise-group select{
   font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:600;font-size:.85rem;
@@ -164,7 +156,6 @@ h1,h2,h3{margin:0;}
   background:var(--surface-2);border-left:3px solid var(--accent-blue);border-radius:7px;
   padding:9px 11px;font-size:.8rem;color:var(--text-muted);line-height:1.4;
 }
-[data-mode="sim"] .hint{display:none;}
 
 .callout-tip{
   background:var(--surface-2);border-left:3px solid var(--accent-green);border-radius:7px;
@@ -174,12 +165,12 @@ h1,h2,h3{margin:0;}
 .zone-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:.76rem;color:var(--text-muted);}
 .zone-legend span{display:inline-flex;align-items:center;gap:6px;}
 .zone-swatch{width:12px;height:12px;border-radius:50%;display:inline-block;}
-.zone-swatch-leve{background:var(--zone-leve);}
-.zone-swatch-mover{background:var(--zone-mover);}
-.zone-swatch-pesado{background:var(--zone-pesado);}
+.zone-swatch-leve{background:var(--accent-blue);}
+.zone-swatch-mover{background:var(--accent-amber);}
+.zone-swatch-pesado{background:var(--red);}
 
 /* ---------- máquina / roda / medição (painel unificado) ---------- */
-.machine-figure{margin:0;}
+.machine-figure{margin:0;position:relative;}
 #machineSvg{width:100%;height:auto;display:block;max-height:74vh;}
 
 .base-shadow{fill:rgba(0,0,0,.16);}
@@ -189,22 +180,33 @@ h1,h2,h3{margin:0;}
 .column-highlight{fill:rgba(255,255,255,.18);}
 .flange-stub{fill:var(--metal-dark);stroke:var(--black-part);stroke-width:1;}
 
-/* ---------- visor da máquina (BAL·2D): status + leitura interno/externo ---------- */
+/* ---------- painel de controle (quadrado preto em cima da coluna) ---------- */
+.control-housing{fill:var(--black-part);stroke:var(--metal-dark);stroke-width:2;}
+.control-screen{fill:var(--lcd-bg);stroke:var(--black-part);stroke-width:1;}
+
+/* ---------- visor da máquina: leitura interno/externo, sobreposto à telinha do painel de controle ---------- */
 .machine-readout{
-  background:var(--lcd-bg);color:var(--lcd-fg);border-radius:var(--radius-md);
-  padding:12px 14px;margin-bottom:10px;font-family:"IBM Plex Mono",monospace;
-  box-shadow:inset 0 0 0 2px var(--black-part);
+  position:absolute;
+  left:2.5%;top:3.871%;width:20%;height:13.226%;
+  background:var(--lcd-bg);color:var(--lcd-fg);border-radius:2px;
+  font-family:"IBM Plex Mono",monospace;
+  box-shadow:inset 0 0 0 1px var(--black-part);
+  overflow:hidden;display:flex;align-items:center;justify-content:center;
+  padding:1.1%;
+  --readout-mass-size:20px;
+  --readout-label-size:8px;
+  --readout-led-size:7px;
+  --readout-led-gap:3px;
 }
-.readout-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
-.readout-brand{font-weight:700;font-size:.85rem;letter-spacing:.03em;}
-.readout-led{width:9px;height:9px;border-radius:50%;background:var(--accent-green);display:inline-block;flex:0 0 auto;}
-.readout-led.busy{background:var(--accent-amber);}
-.readout-status{font-size:.68rem;color:var(--lcd-fg-dim);font-weight:600;letter-spacing:.08em;margin-left:auto;}
-.readout-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:center;}
-.readout-col{display:flex;flex-direction:column;gap:2px;}
-.readout-label{display:block;font-size:.64rem;letter-spacing:.12em;color:var(--lcd-fg-dim);}
-.readout-mass{display:block;font-size:1.35rem;font-weight:700;font-variant-numeric:tabular-nums;}
-.machine-readout.is-balanced{box-shadow:inset 0 0 0 2px var(--black-part), 0 0 0 2px var(--accent-green);}
+.readout-grid{display:grid;grid-template-columns:1fr 1fr;gap:4%;text-align:center;width:100%;height:100%;}
+.readout-col{
+  display:flex;flex-direction:column;align-items:center;min-width:0;height:100%;
+  justify-content:space-between;
+  padding-block:calc(var(--readout-mass-size) * .12);
+}
+.readout-label{display:block;font-size:var(--readout-label-size);letter-spacing:.08em;color:var(--lcd-fg-dim);white-space:nowrap;}
+.readout-mass{display:block;font-size:var(--readout-mass-size);font-weight:700;font-variant-numeric:tabular-nums;line-height:1;white-space:nowrap;}
+.machine-readout.is-balanced{box-shadow:inset 0 0 0 1px var(--black-part), 0 0 0 1px var(--accent-green);}
 
 .label{font-family:"IBM Plex Mono",monospace;fill:var(--text-muted);font-size:11px;}
 .label-plane{font-size:10.5px;font-weight:600;}
@@ -250,13 +252,6 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 .tire{fill:var(--black-part);cursor:grab;touch-action:none;}
 .tire:active{cursor:grabbing;}
 
-/* zonas do "diagrama de campo": cobrem a roda toda (como uma esfera grande
-   por cima, bem transparente), centradas no último chumbo de cada plano */
-.field-zones{pointer-events:none;}
-.field-zone{stroke:none;pointer-events:none;}
-.field-zone-leve{fill:var(--zone-leve);}
-.field-zone-mover{fill:var(--zone-mover);}
-.field-zone-pesado{fill:var(--zone-pesado);}
 .rim{stroke:var(--metal-dark);stroke-width:3;cursor:grab;touch-action:none;}
 .rim:active{cursor:grabbing;}
 .spoke{stroke:var(--metal-dark);stroke-width:4;stroke-linecap:round;opacity:.5;}
@@ -266,7 +261,25 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 .hub-cap{fill:var(--metal);stroke:var(--metal-dark);stroke-width:2;}
 .valve-stem rect{fill:var(--metal-dark);}
 
-.ref-pointer polygon{fill:var(--red);}
+/* ---------- diagrama de campo: marcações leve/mover/pesado num anel FIXO,
+   por fora do pneu, ancorado na referência da máquina (90° = topo = REF) —
+   não gira quando a roda é arrastada, é a mesma leitura de sempre (LEDs,
+   seta REF) só que desenhada por cima, cobrindo os 360° ---------- */
+.field-zones{pointer-events:none;}
+.field-zone{stroke:var(--black-part);stroke-opacity:.15;stroke-width:1;pointer-events:none;}
+.field-zone-leve{fill:var(--zone-leve);}
+.field-zone-mover{fill:var(--zone-mover);}
+.field-zone-pesado{fill:var(--zone-pesado);}
+.field-zone-arrow-tail{stroke:var(--accent-amber);stroke-width:3;stroke-linecap:round;}
+.field-zone-arrow-head{fill:var(--accent-amber);stroke:var(--black-part);stroke-width:.5;stroke-opacity:.3;}
+.field-weight-icon circle{fill:var(--metal-dark);stroke:var(--black-part);stroke-width:1.5;}
+.field-weight-icon text{
+  fill:#fff;font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:15px;
+  text-anchor:middle;dominant-baseline:central;pointer-events:none;
+}
+
+.ref-pointer polygon{fill:var(--red);transition:fill .15s ease;}
+.ref-pointer.aligned polygon{fill:var(--accent-green);}
 .ref-pointer text{fill:var(--text-muted);font-family:"IBM Plex Mono",monospace;font-size:10px;}
 
 .angle-tick line{stroke:var(--border);stroke-width:1.5;}
@@ -284,7 +297,6 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 .target-ghost.internal{stroke:var(--accent-blue);}
 .target-ghost.external{stroke:var(--accent-orange);}
 .target-ghost text{font-family:"IBM Plex Mono",monospace;font-size:9px;fill:var(--text-muted);}
-[data-mode="sim"] #targetGhosts{display:none;}
 
 /* ----- controles abaixo do desenho ----- */
 .view-toggle-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;}
@@ -300,10 +312,6 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 .diameter-readout{font-family:"IBM Plex Mono",monospace;font-weight:700;font-size:.92rem;margin:0;padding:7px 0;}
 
 /* ---------- balanceamento (coluna direita) ---------- */
-.panel-action{
-  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);
-  padding:14px;display:flex;flex-direction:column;gap:10px;
-}
 
 .led-row{display:flex;justify-content:center;gap:5px;margin-top:6px;}
 .led-dot{
@@ -313,8 +321,13 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 .led-dot.lit{background:var(--lcd-fg);box-shadow:0 0 6px var(--lcd-fg);border-color:var(--lcd-fg);}
 .led-dot.lit-full{background:#baffc9;box-shadow:0 0 9px 2px var(--lcd-fg);border-color:#baffc9;}
 
+.machine-readout .led-row{gap:var(--readout-led-gap);margin-top:0;}
+.machine-readout .led-dot{width:var(--readout-led-size);height:var(--readout-led-size);border-width:1px;flex:0 0 auto;}
+.machine-readout .led-dot.lit{box-shadow:0 0 calc(var(--readout-led-size) * .22) var(--lcd-fg);}
+.machine-readout .led-dot.lit-full{box-shadow:0 0 calc(var(--readout-led-size) * .28) var(--lcd-fg);}
+.machine-readout .display-angle-exact{display:none;}
+
 .display-angle-exact{display:block;font-size:.82rem;opacity:.75;font-variant-numeric:tabular-nums;margin-top:4px;}
-[data-mode="sim"] .display-angle-exact{display:none;}
 
 .feedback{
   margin:0;font-size:.86rem;padding:10px 12px;border-radius:8px;background:var(--surface-2);
@@ -371,6 +384,9 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 }
 .weight-list li span{overflow:hidden;text-overflow:ellipsis;}
 .weight-list li.selected{border-color:var(--red);box-shadow:0 0 0 2px rgba(200,32,44,.22);}
+.weight-list li.verdict-leve{border-left:3px solid var(--accent-blue);padding-left:8px;}
+.weight-list li.verdict-mover{border-left:3px solid var(--accent-amber);padding-left:8px;}
+.weight-list li.verdict-pesado{border-left:3px solid var(--red);padding-left:8px;}
 .weight-list li button{
   border:none;background:none;color:var(--text-muted);cursor:pointer;font-size:.85rem;padding:0 2px;
   line-height:1;flex:0 0 auto;
@@ -416,3 +432,29 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 .zone-item-leve{border-left-color:var(--zone-leve);}
 .zone-item-mover{border-left-color:var(--zone-mover);}
 .zone-item-pesado{border-left-color:var(--zone-pesado);}
+
+/* ---------- alerta de "roda balanceada" ---------- */
+.modal-overlay{
+  position:fixed;inset:0;z-index:100;
+  background:rgba(15,14,12,.55);
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;
+  animation:modalFadeIn .18s ease-out;
+}
+.modal-overlay[hidden]{display:none;}
+.modal-card{
+  background:var(--surface);border-radius:var(--radius-lg);
+  box-shadow:0 24px 60px rgba(0,0,0,.3);
+  max-width:340px;width:100%;
+  padding:32px 28px 24px;text-align:center;
+  animation:modalPopIn .22s cubic-bezier(.34,1.56,.64,1);
+}
+.modal-icon{font-size:3rem;line-height:1;margin-bottom:10px;}
+.modal-title{
+  margin:0 0 8px;font-family:"IBM Plex Sans Condensed",sans-serif;
+  font-size:1.5rem;font-weight:700;color:var(--accent-green);
+}
+.modal-message{margin:0 0 22px;color:var(--text-muted);font-size:.9rem;line-height:1.45;}
+.modal-ok{width:100%;}
+@keyframes modalFadeIn{from{opacity:0}to{opacity:1}}
+@keyframes modalPopIn{from{opacity:0;transform:scale(.86) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}

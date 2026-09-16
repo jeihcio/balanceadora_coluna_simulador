@@ -11,9 +11,8 @@
   var WEIGHT_VALUES = [5, 10, 20, 25]; // únicos valores de chumbo disponíveis na máquina
   var A_MIN = 50, A_MAX = 300;
   var B_MIN = 50, B_MAX = 300;
-  var CONTACT_TOL = 5;      // mm/px (escala 1:1) para considerar "encostou"
+  var CONTACT_TOL = 9;      // mm/px (escala 1:1) para considerar "encostou"
   var PLANE_LABEL_TIGHT_GAP = 90; // abaixo disso (px), os rótulos INTERNO/EXTERNO abrem para fora p/ não colidir
-  var MOVE_STEP_DEG = 5;    // incremento dos botões de mover chumbo
   var FLANGE_X = 190;       // referência fixa da máquina (início da medida A)
   var WHEEL_CY = 335;       // altura comum: régua A, perfil lateral e centro da roda de frente
   var RULER_B_Y = 455;      // altura da régua B (embaixo da roda)
@@ -37,7 +36,7 @@
      ESTADO DA SIMULAÇÃO
      ================================================================ */
   var state = {
-    mode: 'sim',
+    mode: 'learn',
     wheelView: 'side',
     tolerance: 15, // tolerância padrão = soma dos dois planos
 
@@ -53,7 +52,11 @@
     hasSpun: false,
 
     unbalance: { internal: { mass: 45, angle: 40 }, external: { mass: 35, angle: 200 } },
-    weights: { internal: [], external: [] },
+    // cada plano tem só um "conjunto" de chumbos: todos colados um no
+    // outro, no mesmo ângulo (peças reais coladas na roda não flutuam
+    // separadas) — angle é a posição do conjunto, pieces é a lista das
+    // gramaturas individuais que o compõem.
+    weights: { internal: { angle: 0, pieces: [] }, external: { angle: 0, pieces: [] } },
     pendingMass: { internal: 5, external: 5 },
     selectedWeight: null,
     lastReading: { internal: null, external: null }
@@ -92,21 +95,19 @@
     return Math.round(value / step) * step;
   }
 
-  // soma vetorial de todos os chumbos de um plano
-  function sumWeights(list) {
-    var acc = { x: 0, y: 0 };
-    for (var i = 0; i < list.length; i++) {
-      acc = addVec(acc, toVector(list[i].mass, list[i].angle));
-    }
-    return acc;
+  // massa total dos chumbos de um plano (todos ficam colados um no outro,
+  // no mesmo ângulo — a máquina trata o conjunto como uma peça só)
+  function planeTotalMass(plane) {
+    return state.weights[plane].pieces.reduce(function (a, b) { return a + b; }, 0);
   }
 
-  // desbalanceamento restante de um plano = alvo - soma dos chumbos colocados
+  // desbalanceamento restante de um plano = alvo - chumbos colocados
   // a leitura da máquina é sempre múltiplo de 5 g (só existe chumbo nesses
   // valores, então não faz sentido exibir uma leitura "quebrada")
   function computeRemaining(plane) {
     var target = toVector(state.unbalance[plane].mass, state.unbalance[plane].angle);
-    var placed = sumWeights(state.weights[plane]);
+    var wp = state.weights[plane];
+    var placed = toVector(planeTotalMass(plane), wp.angle);
     var result = fromVector(subVec(target, placed));
     result.mass = roundToStep(result.mass, MASS_STEP);
     return result;
@@ -124,29 +125,34 @@
     return 60 + (diameterIn - 13) * 10;
   }
 
-  // ponto num círculo com 0° no topo, crescendo no sentido horário
+  // ponto num círculo com a convenção de graus da MÁQUINA: 0° no lado
+  // esquerdo (9h), 90° no topo (12h), 180° na direita (3h), 270° embaixo
+  // (6h) — crescendo no sentido horário. É só um deslocamento de fase de
+  // -90° em relação à parametrização "matemática" padrão (0°=topo).
   function polarXY(cx, cy, r, angleDeg) {
-    var rad = (angleDeg * Math.PI) / 180;
+    var rad = ((angleDeg - 90) * Math.PI) / 180;
     return { x: cx + r * Math.sin(rad), y: cy - r * Math.cos(rad) };
   }
 
-  // inverso de polarXY: converte um ponto de volta para ângulo (0-359°)
+  // inverso de polarXY: converte um ponto de volta para ângulo (0-359°),
+  // já na mesma convenção (0°=esquerda/9h, 90°=topo/12h, ...)
   function angleFromPoint(cx, cy, x, y) {
-    var a = (Math.atan2(x - cx, cy - y) * 180) / Math.PI;
+    var a = (Math.atan2(x - cx, cy - y) * 180) / Math.PI + 90;
     return ((a % 360) + 360) % 360;
   }
 
-  // "fatia de pizza" (setor preenchido) do centro (cx,cy) até o raio r, de
-  // startDeg a endDeg (sentido horário) — usada pelas zonas do diagrama de
-  // campo, que cobrem a roda toda como uma esfera grande e transparente
-  function describeWedgePath(cx, cy, r, startDeg, endDeg) {
-    var s = ((startDeg % 360) + 360) % 360;
-    var span = ((endDeg - startDeg) % 360 + 360) % 360 || 360;
-    var p1 = polarXY(cx, cy, r, s);
-    var p2 = polarXY(cx, cy, r, s + span);
-    var largeArc = span > 180 ? 1 : 0;
-    return 'M ' + cx + ' ' + cy + ' L ' + p1.x + ' ' + p1.y +
-      ' A ' + r + ' ' + r + ' 0 ' + largeArc + ' 1 ' + p2.x + ' ' + p2.y + ' Z';
+  // traduz um ângulo (convenção da máquina, 90°=12h) pra hora de relógio —
+  // do jeito que um borracheiro pensa a posição na roda. 30° = 1 hora;
+  // quando não cai numa hora cheia, mostra minutos (ex.: 40° -> "10:20").
+  function hourLabel(angleDeg) {
+    var h = ((angleDeg - 90) / 30) % 12;
+    if (h < 0) h += 12;
+    var whole = Math.floor(h);
+    var minutes = Math.round((h - whole) * 60);
+    if (minutes === 60) { minutes = 0; whole += 1; }
+    whole = whole % 12;
+    if (whole === 0) whole = 12;
+    return minutes === 0 ? (whole + 'h') : (whole + ':' + (minutes < 10 ? '0' : '') + minutes);
   }
 
   function svgPointFromEvent(svgEl, evt) {
@@ -178,11 +184,11 @@
     return d;
   }
 
-  // ângulo (referencial da roda) que está bem no topo (0°, marca REF) agora,
+  // ângulo (referencial da roda) que está bem no topo (90°, marca REF) agora,
   // considerando a rotação atual do rotor — é aí que um chumbo novo "nasce"
   function currentTopWheelAngle() {
     var rotorMod = ((state.rotorAngleRaw % 360) + 360) % 360;
-    return ((-rotorMod % 360) + 360) % 360;
+    return (((90 - rotorMod) % 360) + 360) % 360;
   }
 
   /* ================================================================
@@ -194,7 +200,7 @@
   function cacheRefs() {
     [
       'app', 'toast',
-      'modeLearnBtn', 'modeSimBtn', 'selectPreset', 'btnExercicio',
+      'selectPreset', 'btnExercicio',
       'btnViewToggle', 'viewStatus',
       'machineSvg', 'sideRim', 'sideRimTread',
       'planeInternalLine', 'planeExternalLine', 'planeInternalLabel', 'planeExternalLabel',
@@ -202,15 +208,17 @@
       'rulerBTicks', 'calipersLine', 'handleBIn', 'handleBOut', 'labelB',
       'inputA', 'inputB', 'selectD', 'labelD',
       'angleTicks', 'wheelRotor', 'tireCircle', 'rimCircle', 'spokes',
-      'outerPlaneRing', 'innerPlaneRing', 'fieldZonesInternal', 'fieldZonesExternal', 'valveStem', 'targetGhosts',
+      'outerPlaneRing', 'innerPlaneRing', 'valveStem', 'targetGhosts',
       'weightsInternal', 'weightsExternal', 'refPointer',
-      'btnGirar', 'miniStatus', 'statusLed',
+      'fieldZonesMachine',
+      'btnGirar',
       'machineReadout', 'dispMassInt', 'dispAngleInt', 'dispMassExt', 'dispAngleExt',
       'ledRowInt', 'ledRowExt',
       'feedback', 'inputTolerance',
       'stepValInt', 'stepValExt', 'listInternal', 'listExternal',
       'guideTicks', 'guideMarkerInternal', 'guideMarkerExternal',
-      'guideTextInternal', 'guideTextExternal'
+      'guideTextInternal', 'guideTextExternal',
+      'balancedModal', 'balancedModalMsg', 'btnBalancedOk'
     ].forEach(function (id) { el[id] = q(id); });
   }
 
@@ -257,11 +265,22 @@
       wrap.appendChild(line);
       if (major) {
         var lp = polarXY(FRONT_CX, FRONT_CY, rLabel, a);
+        var anchor = 'middle';
+        // a etiqueta de 0° (9h) fica bem entre a coluna e a roda: com a hora
+        // deixando o texto mais largo, um anchor "middle" na posição radial
+        // normal cai em cima da barra vermelha da coluna. Sobe (foge da
+        // flange "REF. MÁQUINA") e ancora pela esquerda, num x fixo já
+        // livre da coluna, crescendo só pra direita.
+        if (a === 0) {
+          lp.y -= 46;
+          lp.x = 168;
+          anchor = 'start';
+        }
         var t = document.createElementNS(SVG_NS, 'text');
         t.setAttribute('x', lp.x); t.setAttribute('y', lp.y);
-        t.setAttribute('text-anchor', 'middle');
+        t.setAttribute('text-anchor', anchor);
         t.setAttribute('dominant-baseline', 'middle');
-        t.textContent = a + '°';
+        t.textContent = a + '° (' + hourLabel(a) + ')';
         wrap.appendChild(t);
       }
       g.appendChild(wrap);
@@ -269,21 +288,21 @@
   }
 
   function buildRefPointer() {
-    var top = polarXY(FRONT_CX, FRONT_CY, 240, 0);
+    var top = polarXY(FRONT_CX, FRONT_CY, 240, 90); // 90° = topo (12h) na convenção da máquina
     el.refPointer.innerHTML =
       '<polygon points="' + (top.x - 8) + ',' + (top.y - 16) + ' ' + (top.x + 8) + ',' + (top.y - 16) + ' ' + top.x + ',' + (top.y - 4) + '"></polygon>' +
-      '<text x="' + top.x + '" y="' + (top.y - 20) + '" text-anchor="middle">REF 0°</text>';
+      '<text x="' + top.x + '" y="' + (top.y - 20) + '" text-anchor="middle">REF 90° (12h)</text>';
   }
 
   /* ================================================================
      RELÓGIO DIDÁTICO (guia de posicionamento do chumbo)
-     Reaproveita a mesma convenção da roda de frente: 12h = REF (0°, topo),
+     Reaproveita a mesma convenção da roda de frente: 12h = REF (90°, topo),
      ângulos crescendo no sentido horário (12h -> 3h -> 6h -> 9h).
      ================================================================ */
   function buildGuideTicks() {
     var g = el.guideTicks;
     g.innerHTML = '';
-    var hours = [{ h: 12, a: 0 }, { h: 3, a: 90 }, { h: 6, a: 180 }, { h: 9, a: 270 }];
+    var hours = [{ h: 12, a: 90 }, { h: 3, a: 180 }, { h: 6, a: 270 }, { h: 9, a: 0 }];
     hours.forEach(function (tick) {
       var p1 = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R - 8, tick.a);
       var p2 = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R + 2, tick.a);
@@ -313,47 +332,59 @@
     renderGuidePlane('external', el.guideMarkerExternal, el.guideTextExternal);
   }
 
+  // veredito do conjunto de chumbos de um plano (todos colados, mesmo
+  // ângulo): leve, pesado, fora do lugar (mover) ou já balanceado —
+  // compara o alvo real restante (computeRemaining) com o ângulo do
+  // conjunto. Usado tanto no painel "Diagrama de campo" quanto na cor da
+  // etiqueta "X g @ Y°" na lista de chumbos (em vez de pintar a própria
+  // roda, que só causava confusão).
+  function computeVerdict(plane) {
+    var wp = state.weights[plane];
+    if (!state.hasSpun || !wp.pieces.length) return null;
+    var rem = computeRemaining(plane);
+    if (rem.mass === 0) return { key: 'balanced', rem: rem };
+    var diff = angularDist(rem.angle, wp.angle);
+    var signed = angularSignedDiff(rem.angle, wp.angle);
+    if (diff <= 30) return { key: 'leve', rem: rem };
+    if (diff >= 150) return { key: 'pesado', rem: rem };
+    return { key: 'mover', dir: signed > 0 ? 1 : -1, rem: rem };
+  }
+
   function renderGuidePlane(plane, markerEl, textEl) {
     var planeName = plane === 'internal' ? 'Interno' : 'Externo';
-    var list = state.weights[plane];
+    var wp = state.weights[plane];
 
     if (!state.hasSpun) {
       markerEl.innerHTML = '';
       textEl.innerHTML = '<strong>' + planeName + ':</strong> gire a roda para começar a procurar o ponto.';
       return;
     }
-    if (list.length === 0) {
+    if (wp.pieces.length === 0) {
       markerEl.innerHTML = '';
       textEl.innerHTML = '<strong>' + planeName + ':</strong> gire a roda até as bolinhas acenderem, depois clique em + Chumbo.';
       return;
     }
 
-    var dotsHtml = list.map(function (w) {
-      var p = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R, w.angle);
-      return '<circle cx="' + p.x + '" cy="' + p.y + '" r="6" class="guide-marker-dot"></circle>';
-    }).join('');
+    var clusterPoint = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R, wp.angle);
+    var dotsHtml = '<circle cx="' + clusterPoint.x + '" cy="' + clusterPoint.y + '" r="6" class="guide-marker-dot"></circle>';
 
-    var rem = computeRemaining(plane);
+    var verdict = computeVerdict(plane);
     var verdictHtml;
-    if (rem.mass === 0) {
+    if (verdict.key === 'balanced') {
       verdictHtml = 'balanceado — nenhum ajuste a mais necessário.';
     } else {
-      var ref = list[list.length - 1];
-      var diff = angularDist(rem.angle, ref.angle);
-      var signed = angularSignedDiff(rem.angle, ref.angle);
-      if (diff <= 30) {
-        verdictHtml = '<strong>leve</strong> — ainda faltam ' + rem.mass + ' g bem onde ele está; some outro chumbo do lado ou troque por um mais pesado.';
-      } else if (diff >= 150) {
+      if (verdict.key === 'leve') {
+        verdictHtml = '<strong>leve</strong> — ainda faltam ' + verdict.rem.mass + ' g bem onde ele está; some outro chumbo do lado ou troque por um mais pesado.';
+      } else if (verdict.key === 'pesado') {
         verdictHtml = '<strong>pesado</strong> — tem peso sobrando do lado oposto; troque por um chumbo mais leve.';
       } else {
-        var dirText = signed > 0 ? 'avance o chumbo (Mover ►)' : 'recue o chumbo (◄ Mover)';
+        var dirText = verdict.dir > 0 ? 'avance o chumbo (Mover ►)' : 'recue o chumbo (◄ Mover)';
         verdictHtml = '<strong>fora do lugar</strong> — o peso está OK, mas ' + dirText + '.';
       }
-      if (state.mode === 'learn') {
-        var pTarget = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R, rem.angle);
-        dotsHtml += '<circle cx="' + pTarget.x + '" cy="' + pTarget.y + '" r="9" class="guide-target-ring"></circle>';
-        verdictHtml += ' <span class="guide-exact">(conferindo: alvo real ' + rem.mass + ' g a ' + Math.round(rem.angle) + '°)</span>';
-      }
+      // informações do modo Aprendizado ficam sempre visíveis
+      var pTarget = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R, verdict.rem.angle);
+      dotsHtml += '<circle cx="' + pTarget.x + '" cy="' + pTarget.y + '" r="9" class="guide-target-ring"></circle>';
+      verdictHtml += ' <span class="guide-exact">(conferindo: alvo real ' + verdict.rem.mass + ' g a ' + Math.round(verdict.rem.angle) + '° / ' + hourLabel(verdict.rem.angle) + ')</span>';
     }
 
     markerEl.innerHTML = dotsHtml;
@@ -375,7 +406,7 @@
   function buildPresetSelect() {
     var randomOpt = document.createElement('option');
     randomOpt.value = 'random';
-    randomOpt.textContent = 'Aleatório';
+    randomOpt.textContent = 'Aro aleatório';
     el.selectPreset.appendChild(randomOpt);
     WHEEL_PRESETS.forEach(function (p) {
       var opt = document.createElement('option');
@@ -466,26 +497,31 @@
     el.planeExternalLabel.setAttribute('x', labelsTight ? rim.externalX + 6 : rim.externalX);
 
     // régua A: sai da flange (referência fixa) até a roda
-    var aVal = state.handleA_x - FLANGE_X;
-    el.rulerALine.setAttribute('x1', FLANGE_X);
-    el.rulerALine.setAttribute('x2', state.handleA_x);
-    el.handleA.setAttribute('transform', 'translate(' + state.handleA_x + ',' + WHEEL_CY + ')');
-    el.labelA.setAttribute('x', (FLANGE_X + state.handleA_x) / 2);
-    el.labelA.textContent = 'A = ' + Math.round(aVal) + ' mm';
+    // Dentro da tolerância, a seta "encaixa" exatamente em cima da linha do
+    // plano (nada de ficar verde com um resto de folga visível).
     var contactA = Math.abs(state.handleA_x - rim.internalX) <= CONTACT_TOL;
+    var drawA_x = contactA ? rim.internalX : state.handleA_x;
+    var aVal = drawA_x - FLANGE_X;
+    el.rulerALine.setAttribute('x1', FLANGE_X);
+    el.rulerALine.setAttribute('x2', drawA_x);
+    el.handleA.setAttribute('transform', 'translate(' + drawA_x + ',' + WHEEL_CY + ')');
+    el.labelA.setAttribute('x', (FLANGE_X + drawA_x) / 2);
+    el.labelA.textContent = 'A = ' + Math.round(aVal) + ' mm';
     el.rulerALine.classList.toggle('contact', contactA);
     el.handleA.classList.toggle('contact', contactA);
 
     // régua B: embaixo da roda
-    el.handleBIn.setAttribute('transform', 'translate(' + state.handleBIn_x + ',' + RULER_B_Y + ')');
-    el.handleBOut.setAttribute('transform', 'translate(' + state.handleBOut_x + ',' + RULER_B_Y + ')');
-    el.calipersLine.setAttribute('x1', state.handleBIn_x);
-    el.calipersLine.setAttribute('x2', state.handleBOut_x);
-    var bVal = state.handleBOut_x - state.handleBIn_x;
-    el.labelB.setAttribute('x', (state.handleBIn_x + state.handleBOut_x) / 2);
-    el.labelB.textContent = 'B = ' + Math.round(bVal) + ' mm';
     var contactBIn = Math.abs(state.handleBIn_x - rim.internalX) <= CONTACT_TOL;
     var contactBOut = Math.abs(state.handleBOut_x - rim.externalX) <= CONTACT_TOL;
+    var drawBIn_x = contactBIn ? rim.internalX : state.handleBIn_x;
+    var drawBOut_x = contactBOut ? rim.externalX : state.handleBOut_x;
+    el.handleBIn.setAttribute('transform', 'translate(' + drawBIn_x + ',' + RULER_B_Y + ')');
+    el.handleBOut.setAttribute('transform', 'translate(' + drawBOut_x + ',' + RULER_B_Y + ')');
+    el.calipersLine.setAttribute('x1', drawBIn_x);
+    el.calipersLine.setAttribute('x2', drawBOut_x);
+    var bVal = drawBOut_x - drawBIn_x;
+    el.labelB.setAttribute('x', (drawBIn_x + drawBOut_x) / 2);
+    el.labelB.textContent = 'B = ' + Math.round(bVal) + ' mm';
     el.handleBIn.classList.toggle('contact', contactBIn);
     el.handleBOut.classList.toggle('contact', contactBOut);
     el.calipersLine.classList.toggle('contact', contactBIn && contactBOut);
@@ -517,108 +553,137 @@
     return !!state.selectedWeight && state.selectedWeight.plane === plane && state.selectedWeight.index === idx;
   }
 
-  // faixas translúcidas do diagrama de campo, direto na roda: leve perto do
-  // alvo, pesado do lado oposto, mover nos dois flancos. O centro (ref) é o
-  // ângulo-alvo da ÚLTIMA medição (state.lastReading) — FIXO enquanto você
-  // mexe nos chumbos, só muda quando gira de novo. Colocar/mover um chumbo
-  // não desloca as zonas (senão elas perseguem o próprio chumbo e deixam de
-  // servir de referência).
-  function renderFieldZones() {
-    renderFieldZonesForPlane('internal', el.fieldZonesInternal);
-    renderFieldZonesForPlane('external', el.fieldZonesExternal);
-  }
-
-  function renderFieldZonesForPlane(plane, container) {
-    var reading = state.lastReading[plane];
-    if (!state.hasSpun || !reading || reading.mass === 0) {
-      container.innerHTML = '';
-      return;
-    }
-    var ref = reading.angle; // fixo: alvo da última medição, não do último chumbo
-    var bigR = state.geom.tireR; // cobre a roda inteira (como uma esfera grande por cima), não só o aro
-    var zones = [
-      { from: ref - 30, to: ref + 30, cls: 'field-zone-leve' },
-      { from: ref + 30, to: ref + 150, cls: 'field-zone-mover' },
-      { from: ref + 150, to: ref + 210, cls: 'field-zone-pesado' },
-      { from: ref + 210, to: ref + 330, cls: 'field-zone-mover' }
-    ];
-    container.innerHTML = zones.map(function (z) {
-      var d = describeWedgePath(state.geom.cx, state.geom.cy, bigR, z.from, z.to);
-      return '<path d="' + d + '" class="field-zone ' + z.cls + '"></path>';
-    }).join('');
-  }
-
   function renderWeights() {
     renderWeightGroup('internal', el.weightsInternal, state.geom.innerR);
     renderWeightGroup('external', el.weightsExternal, state.geom.outerR);
     renderWeightLists();
     renderTargetGhosts();
-    renderFieldZones();
     renderGuide();
   }
 
-  function renderWeightGroup(plane, container, radius) {
-    container.innerHTML = '';
-    var list = state.weights[plane];
-    for (var idx = 0; idx < list.length; idx++) {
-      var w = list[idx];
-      var p = polarXY(state.geom.cx, state.geom.cy, radius, w.angle);
-      var g = document.createElementNS(SVG_NS, 'g');
-      g.setAttribute('class', 'weight-marker ' + plane + (isSelected(plane, idx) ? ' selected' : ''));
-      g.setAttribute('transform', 'translate(' + p.x + ',' + p.y + ')');
-      g.setAttribute('tabindex', '0');
-      g.setAttribute('role', 'button');
-      g.setAttribute('aria-label', 'Chumbo de ' + w.mass + ' gramas a ' + Math.round(w.angle) + ' graus, plano ' + planeLabel(plane));
-      var circle = document.createElementNS(SVG_NS, 'circle');
-      circle.setAttribute('r', '14');
-      var text = document.createElementNS(SVG_NS, 'text');
-      text.setAttribute('y', '1');
-      text.textContent = String(w.mass);
-      g.appendChild(circle);
-      g.appendChild(text);
-      container.appendChild(g);
-      attachWeightDrag(g, plane, idx, radius);
+  // raio visual de cada chumbo, correlacionado com a gramatura (chumbos
+  // maiores em massa nascem visivelmente maiores, ainda que a diferença
+  // seja pequena) — mapeia o intervalo dos valores reais de chumbo
+  // disponíveis (WEIGHT_VALUES) num intervalo de raios em px.
+  var PIECE_MASS_MIN = Math.min.apply(null, WEIGHT_VALUES);
+  var PIECE_MASS_MAX = Math.max.apply(null, WEIGHT_VALUES);
+  var PIECE_RADIUS_MIN = 10, PIECE_RADIUS_MAX = 16;
+  function pieceRadius(mass) {
+    var span = PIECE_MASS_MAX - PIECE_MASS_MIN;
+    var t = span > 0 ? clamp((mass - PIECE_MASS_MIN) / span, 0, 1) : 0;
+    return PIECE_RADIUS_MIN + t * (PIECE_RADIUS_MAX - PIECE_RADIUS_MIN);
+  }
+
+  // vetor unitário tangente ao círculo do plano no ângulo dado, na direção
+  // de ângulo crescente — usado pra enfileirar os chumbos de um conjunto
+  // lado a lado (como clipes de chumbo reais, colados um no outro).
+  function tangentUnit(angleDeg) {
+    var rad = ((angleDeg - 90) * Math.PI) / 180;
+    return { x: Math.cos(rad), y: Math.sin(rad) };
+  }
+
+  // deslocamento (em px, ao longo da tangente) do centro de cada peça,
+  // pra formar uma fileira encostada uma na outra e centralizada no
+  // ângulo do conjunto.
+  function layoutPieceOffsets(pieces) {
+    var radii = pieces.map(pieceRadius);
+    var totalWidth = radii.reduce(function (sum, r) { return sum + 2 * r; }, 0);
+    var offsets = [];
+    var cursor = -totalWidth / 2;
+    for (var i = 0; i < radii.length; i++) {
+      offsets.push(cursor + radii[i]);
+      cursor += 2 * radii[i];
+    }
+    return offsets;
+  }
+
+  function positionClusterEls(groupEls, offsets, radius, angleDeg) {
+    var anchor = polarXY(state.geom.cx, state.geom.cy, radius, angleDeg);
+    var tangent = tangentUnit(angleDeg);
+    for (var i = 0; i < groupEls.length; i++) {
+      var x = anchor.x + tangent.x * offsets[i];
+      var y = anchor.y + tangent.y * offsets[i];
+      groupEls[i].setAttribute('transform', 'translate(' + x + ',' + y + ')');
     }
   }
 
-  function attachWeightDrag(g, plane, index, radius) {
+  // os chumbos de um plano são um conjunto ÚNICO (mesmo ângulo pra todos —
+  // a máquina não sabe separar chumbos colados lado a lado): desenhados
+  // encostados um no outro, e arrastar/mover qualquer peça arrasta/move o
+  // conjunto inteiro junto.
+  function renderWeightGroup(plane, container, radius) {
+    container.innerHTML = '';
+    var wp = state.weights[plane];
+    var pieces = wp.pieces;
+    if (!pieces.length) return;
+
+    var offsets = layoutPieceOffsets(pieces);
+    var groupEls = [];
+    for (var idx = 0; idx < pieces.length; idx++) {
+      var mass = pieces[idx];
+      var r = pieceRadius(mass);
+      var g = document.createElementNS(SVG_NS, 'g');
+      g.setAttribute('class', 'weight-marker ' + plane + (isSelected(plane, idx) ? ' selected' : ''));
+      g.setAttribute('tabindex', '0');
+      g.setAttribute('role', 'button');
+      g.setAttribute('aria-label',
+        'Chumbo de ' + mass + ' gramas, parte de um conjunto de ' + pieces.length +
+        ' no plano ' + planeLabel(plane) + ', a ' + Math.round(wp.angle) + ' graus (' + hourLabel(wp.angle) + ')');
+      var circle = document.createElementNS(SVG_NS, 'circle');
+      circle.setAttribute('r', String(r));
+      var text = document.createElementNS(SVG_NS, 'text');
+      text.setAttribute('y', '1');
+      text.setAttribute('font-size', Math.max(7, r * 0.65).toFixed(1));
+      text.textContent = String(mass);
+      g.appendChild(circle);
+      g.appendChild(text);
+      container.appendChild(g);
+      groupEls.push(g);
+    }
+    positionClusterEls(groupEls, offsets, radius, wp.angle);
+    attachClusterDrag(plane, radius, groupEls, offsets);
+  }
+
+  function attachClusterDrag(plane, radius, groupEls, offsets) {
     var dragging = false;
-    g.addEventListener('pointerdown', function (e) {
-      dragging = true;
-      setWheelView('front');
-      state.selectedWeight = { plane: plane, index: index };
-      try { g.setPointerCapture(e.pointerId); } catch (_) {}
-      renderWeightLists();
-      markSelectionClasses();
-      e.preventDefault();
-      e.stopPropagation();
-    });
-    g.addEventListener('pointermove', function (e) {
+    function onMove(e) {
       if (!dragging) return;
       var pt = svgPointFromEvent(el.machineSvg, e);
       var screenAngle = angleFromPoint(state.geom.cx, state.geom.cy, pt.x, pt.y);
       var rotorMod = ((state.rotorAngleRaw % 360) + 360) % 360;
       var wheelAngle = ((screenAngle - rotorMod) % 360 + 360) % 360;
-      state.weights[plane][index].angle = wheelAngle;
-      var p = polarXY(state.geom.cx, state.geom.cy, radius, wheelAngle);
-      g.setAttribute('transform', 'translate(' + p.x + ',' + p.y + ')');
+      state.weights[plane].angle = wheelAngle;
+      positionClusterEls(groupEls, offsets, radius, wheelAngle);
       renderWeightLists();
       renderTargetGhosts();
       renderGuide();
-    });
-    function end(e) {
+    }
+    function onEnd(e) {
       if (!dragging) return;
       dragging = false;
-      try { g.releasePointerCapture(e.pointerId); } catch (_) {}
+      groupEls.forEach(function (g) { try { g.releasePointerCapture(e.pointerId); } catch (_) {} });
     }
-    g.addEventListener('pointerup', end);
-    g.addEventListener('pointercancel', end);
-    g.addEventListener('keydown', function (e) {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      e.preventDefault();
-      var dir = e.key === 'ArrowRight' ? 1 : -1;
-      state.selectedWeight = { plane: plane, index: index };
-      moveWeight(plane, dir);
+    groupEls.forEach(function (g, idx) {
+      g.addEventListener('pointerdown', function (e) {
+        dragging = true;
+        setWheelView('front');
+        state.selectedWeight = { plane: plane, index: idx };
+        try { g.setPointerCapture(e.pointerId); } catch (_) {}
+        renderWeightLists();
+        markSelectionClasses();
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      g.addEventListener('pointermove', onMove);
+      g.addEventListener('pointerup', onEnd);
+      g.addEventListener('pointercancel', onEnd);
+      g.addEventListener('keydown', function (e) {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        e.preventDefault();
+        var dir = e.key === 'ArrowRight' ? 1 : -1;
+        state.selectedWeight = { plane: plane, index: idx };
+        moveWeight(plane, dir);
+      });
     });
   }
 
@@ -655,18 +720,134 @@
     });
   }
 
+  /* ================================================================
+     DIAGRAMA DE CAMPO: anel FIXO leve/mover/pesado cobrindo os 360°,
+     por fora do pneu — não é desenhado dentro do #wheelRotor, então NÃO
+     gira quando o usuário arrasta a roda. Os ângulos são sempre os da
+     MÁQUINA (mesma referência da seta REF 90° e dos LEDs): 90° = topo.
+
+       T ± 30°        -> LEVE   (é aqui, alinhado com a REF, que se coloca
+                         ou aumenta o chumbo)
+       T+150° a T+210° -> PESADO (lado oposto à REF: chumbo sobrando ali,
+                         troque por um mais leve)
+       nos outros 120° de cada lado -> MOVER: gire a roda nesse sentido
+       até o ponto do plano chegar na faixa "leve" (topo) — esquerda
+       sempre no sentido horário, direita sempre anti-horário.
+
+     Construído uma única vez (é estático: não depende de medição, chumbo
+     ou plano — é a mesma referência fixa da máquina o tempo todo).
+     ================================================================ */
+  function buildFieldZonesMachine() {
+    var container = el.fieldZonesMachine;
+    container.innerHTML = '';
+    var cx = FRONT_CX, cy = FRONT_CY;
+    var rInner = 224, rOuter = 240;
+    var rIcon = (rInner + rOuter) / 2;
+    var T = 90; // topo (12h) na convenção de graus da máquina
+
+    var slices = [
+      { key: 'leve', a0: T - 30, a1: T + 30 },
+      { key: 'mover', a0: T + 30, a1: T + 150, arrowClockwise: false },   // direita: anti-horário
+      { key: 'pesado', a0: T + 150, a1: T + 210 },
+      { key: 'mover', a0: T + 210, a1: T + 330, arrowClockwise: true }    // esquerda: horário
+    ];
+
+    slices.forEach(function (slice) {
+      var path = document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('d', annulusSlicePath(cx, cy, rInner, rOuter, slice.a0, slice.a1));
+      path.setAttribute('class', 'field-zone field-zone-' + slice.key);
+      container.appendChild(path);
+
+      if (slice.key === 'mover') {
+        var span = slice.a1 - slice.a0;
+        [slice.a0 + span * 0.28, slice.a0 + span * 0.72].forEach(function (ang) {
+          container.appendChild(makeFieldZoneArrow(cx, cy, rIcon, ang, slice.arrowClockwise));
+        });
+      }
+    });
+
+    container.appendChild(makeFieldWeightIcon(cx, cy, rIcon, T, '+'));
+    container.appendChild(makeFieldWeightIcon(cx, cy, rIcon, T + 180, '−'));
+  }
+
+  // ícone de "chumbo" (mesmo estilo circular dos marcadores de peso na roda)
+  // com +/- dentro, marcando onde adicionar ou tirar peso
+  function makeFieldWeightIcon(cx, cy, r, angleDeg, glyph) {
+    var p = polarXY(cx, cy, r, angleDeg);
+    var g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('class', 'field-weight-icon');
+    g.setAttribute('transform', 'translate(' + p.x + ',' + p.y + ')');
+    var circle = document.createElementNS(SVG_NS, 'circle');
+    circle.setAttribute('r', '12');
+    g.appendChild(circle);
+    var text = document.createElementNS(SVG_NS, 'text');
+    text.setAttribute('y', '1');
+    text.textContent = glyph;
+    g.appendChild(text);
+    return g;
+  }
+
+  // "fatia de rosquinha" (donut slice) entre dois raios e dois ângulos —
+  // mesma convenção de polarXY (crescendo no sentido horário)
+  function annulusSlicePath(cx, cy, rInner, rOuter, a0, a1) {
+    var p0o = polarXY(cx, cy, rOuter, a0);
+    var p1o = polarXY(cx, cy, rOuter, a1);
+    var p1i = polarXY(cx, cy, rInner, a1);
+    var p0i = polarXY(cx, cy, rInner, a0);
+    var largeArc = (((a1 - a0) % 360) + 360) % 360 > 180 ? 1 : 0;
+    return 'M ' + p0o.x + ' ' + p0o.y +
+      ' A ' + rOuter + ' ' + rOuter + ' 0 ' + largeArc + ' 1 ' + p1o.x + ' ' + p1o.y +
+      ' L ' + p1i.x + ' ' + p1i.y +
+      ' A ' + rInner + ' ' + rInner + ' 0 ' + largeArc + ' 0 ' + p0i.x + ' ' + p0i.y +
+      ' Z';
+  }
+
+  // seta (com rabinho) tangente ao arco em (r, angleDeg), apontando no
+  // sentido horário ou anti-horário — usada nas faixas "mover" para indicar
+  // para qual lado girar a roda até chegar na faixa "leve" (o alvo T).
+  // tangente de polarXY para ângulo crescente aponta, em graus de tela
+  // (0°=direita), no valor (angleDeg - 90) — por isso o -90 abaixo.
+  function makeFieldZoneArrow(cx, cy, r, angleDeg, clockwise) {
+    var p = polarXY(cx, cy, r, angleDeg);
+    var base = angleDeg - 90;
+    var tangentDeg = clockwise ? base : base + 180;
+    var g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('class', 'field-zone-arrow');
+    g.setAttribute('transform', 'translate(' + p.x + ',' + p.y + ') rotate(' + tangentDeg + ')');
+    var tail = document.createElementNS(SVG_NS, 'line');
+    tail.setAttribute('x1', '-13'); tail.setAttribute('y1', '0');
+    tail.setAttribute('x2', '2'); tail.setAttribute('y2', '0');
+    tail.setAttribute('class', 'field-zone-arrow-tail');
+    g.appendChild(tail);
+    var head = document.createElementNS(SVG_NS, 'polygon');
+    head.setAttribute('points', '9,0 -4,-6 -4,6');
+    head.setAttribute('class', 'field-zone-arrow-head');
+    g.appendChild(head);
+    return g;
+  }
+
   function renderWeightLists() {
     fillList(el.listInternal, 'internal');
     fillList(el.listExternal, 'external');
   }
 
+  // a cor leve/mover/pesado (que antes ficava pintada na roda, e só causava
+  // confusão girando e recentralizando junto com os chumbos) fica junto do
+  // próprio ângulo na lista: uma faixa colorida do lado da etiqueta "X g @ Y°"
+  // do ÚLTIMO chumbo de cada plano, com o mesmo veredito do Diagrama de Campo.
   function fillList(ul, plane) {
     ul.innerHTML = '';
-    state.weights[plane].forEach(function (w, idx) {
+    var verdict = computeVerdict(plane);
+    var wp = state.weights[plane];
+    var lastIdx = wp.pieces.length - 1;
+    wp.pieces.forEach(function (mass, idx) {
       var li = document.createElement('li');
       if (isSelected(plane, idx)) li.classList.add('selected');
+      if (idx === lastIdx && verdict && verdict.key !== 'balanced') {
+        li.classList.add('verdict-' + verdict.key);
+      }
       var span = document.createElement('span');
-      span.textContent = w.mass + ' g @ ' + Math.round(w.angle) + '°';
+      span.textContent = mass + ' g @ ' + Math.round(wp.angle) + '° / ' + hourLabel(wp.angle);
       li.appendChild(span);
       var btn = document.createElement('button');
       btn.type = 'button';
@@ -686,67 +867,65 @@
     });
   }
 
-  // na vida real não dá pra colar dois chumbos exatamente no mesmo ponto:
-  // cada um novo nasce na marca de referência atual (topo) e, se já houver
-  // chumbo bem ali, ele nasce um pouco ao lado (um seguido do outro)
-  function pickWeightAngle(plane) {
-    var base = currentTopWheelAngle();
-    var list = state.weights[plane];
-    var MIN_GAP = 7, STEP = 10;
-    var angle = base;
-    for (var tries = 1; tries <= 20; tries++) {
-      var occupied = list.some(function (w) { return angularDist(w.angle, angle) < MIN_GAP; });
-      if (!occupied) break;
-      var dir = tries % 2 === 1 ? 1 : -1;
-      var mag = Math.ceil(tries / 2) * STEP;
-      angle = ((base + dir * mag) % 360 + 360) % 360;
-    }
-    return angle;
-  }
-
   function addWeight(plane) {
     setWheelView('front');
     var mass = state.pendingMass[plane];
-    var angle = pickWeightAngle(plane);
-    var nudged = angularDist(angle, currentTopWheelAngle()) > 0.01;
-    state.weights[plane].push({ mass: mass, angle: angle });
-    state.selectedWeight = { plane: plane, index: state.weights[plane].length - 1 };
+    var wp = state.weights[plane];
+    var isNewCluster = wp.pieces.length === 0;
+    if (isNewCluster) wp.angle = currentTopWheelAngle();
+    wp.pieces.push(mass);
+    state.selectedWeight = { plane: plane, index: wp.pieces.length - 1 };
     renderWeights();
     setFeedback(
-      'Chumbo de ' + mass + ' g adicionado no plano ' + planeLabel(plane) + ', na marca de referência (topo)' +
-      (nudged ? ', deslocado um pouco do chumbo vizinho' : '') + '. Gire a roda para medir de novo.',
+      'Chumbo de ' + mass + ' g adicionado no plano ' + planeLabel(plane) +
+      (isNewCluster
+        ? ', na marca de referência (topo)'
+        : ', colado junto com os outros chumbos desse plano — a máquina trata o conjunto como uma peça só') +
+      '. Gire a roda para medir de novo.',
       'neutral'
     );
   }
 
   function removeWeight(plane) {
     setWheelView('front');
-    if (!state.weights[plane].length) return;
-    state.weights[plane].pop();
+    var wp = state.weights[plane];
+    if (!wp.pieces.length) return;
+    wp.pieces.pop();
     if (state.selectedWeight && state.selectedWeight.plane === plane &&
-        state.selectedWeight.index >= state.weights[plane].length) {
+        state.selectedWeight.index >= wp.pieces.length) {
       state.selectedWeight = null;
     }
     renderWeights();
   }
 
   function removeWeightAt(plane, idx) {
-    state.weights[plane].splice(idx, 1);
+    state.weights[plane].pieces.splice(idx, 1);
     state.selectedWeight = null;
     renderWeights();
   }
 
+  // o incremento do botão Mover não é um valor fixo: é a largura física
+  // (traduzida em graus, no raio desse plano) do próprio conjunto de
+  // chumbos colados — mover "a distância de uma peça da gramatura que o
+  // sistema indicou" (ex.: 50 g = dois chumbos de 25, ou dois de 20 e um
+  // de 10 — a largura desses chumbos juntos).
+  function moveStepDegFor(plane) {
+    var wp = state.weights[plane];
+    var radius = plane === 'internal' ? state.geom.innerR : state.geom.outerR;
+    var widthPx = wp.pieces.reduce(function (sum, m) { return sum + 2 * pieceRadius(m); }, 0);
+    if (!widthPx) widthPx = 2 * pieceRadius(WEIGHT_VALUES[0]);
+    return (widthPx / (2 * Math.PI * radius)) * 360;
+  }
+
   function moveWeight(plane, dir) {
     setWheelView('front');
-    var list = state.weights[plane];
-    if (!list.length) {
+    var wp = state.weights[plane];
+    if (!wp.pieces.length) {
       setFeedback('Não há chumbo no plano ' + planeLabel(plane) + ' para mover. Adicione um chumbo primeiro.', 'neutral');
       return;
     }
-    var idx = (state.selectedWeight && state.selectedWeight.plane === plane) ? state.selectedWeight.index : list.length - 1;
-    var w = list[idx];
-    w.angle = ((w.angle + dir * MOVE_STEP_DEG) % 360 + 360) % 360;
-    state.selectedWeight = { plane: plane, index: idx };
+    var stepDeg = moveStepDegFor(plane);
+    wp.angle = ((wp.angle + dir * stepDeg) % 360 + 360) % 360;
     renderWeights();
   }
 
@@ -776,14 +955,13 @@
   }
 
   function setStatusLed(busy) {
-    el.statusLed.classList.toggle('busy', busy);
-    el.miniStatus.textContent = busy ? 'GIRANDO...' : 'PRONTA';
+    if (el.statusLed) el.statusLed.classList.toggle('busy', busy);
   }
 
   /* ================================================================
      BOLINHAS DE POSIÇÃO (como o visor de LEDs de uma balanceadora real)
      Em vez de mostrar o ângulo exato, o simulador mede o quão perto a
-     marca do topo (REF 0°) está do ponto certo do plano; o usuário
+     marca do topo (REF 90°) está do ponto certo do plano; o usuário
      descobre o lugar girando a roda manualmente até acender tudo.
      ================================================================ */
   var LED_COUNT = 5;
@@ -816,20 +994,26 @@
   // as bolinhas seguem a ÚLTIMA medição (state.lastReading), não o alvo "ao
   // vivo" — igual numa máquina real, que só atualiza a leitura girando de
   // novo. Só girar a roda manualmente (rotorAngleRaw) mexe nas bolinhas;
-  // colocar/mover um chumbo não altera a leitura até o próximo GIRAR.
+  // colocar/mover um chumbo não altera a leitura até o próximo GIRAR. A seta
+  // de referência (REF 90°) também fica verde quando algum plano bate 5/5 —
+  // um segundo sinal, bem visível, de que a roda está no lugar certo.
   function updateLeds() {
     if (!state.hasSpun) {
       setLedRow(el.ledRowInt, 0);
       setLedRow(el.ledRowExt, 0);
+      el.refPointer.classList.remove('aligned');
       return;
     }
     var top = currentTopWheelAngle();
+    var anyFull = false;
     ['internal', 'external'].forEach(function (plane) {
       var container = plane === 'internal' ? el.ledRowInt : el.ledRowExt;
       var reading = state.lastReading[plane];
       var lit = reading.mass === 0 ? LED_COUNT : ledsForDiff(angularDist(top, reading.angle));
+      if (lit === LED_COUNT) anyFull = true;
       setLedRow(container, lit);
     });
+    el.refPointer.classList.toggle('aligned', anyFull);
   }
 
   // gira a roda "na mão", arrastando qualquer parte dela (pneu OU aro/aro
@@ -914,7 +1098,6 @@
     state.lastReading = { internal: curInt, external: curExt };
     state.hasSpun = true;
     renderTargetGhosts();
-    renderFieldZones();
     updateLeds();
     renderGuide();
   }
@@ -930,6 +1113,42 @@
     el.dispAngleExt.textContent = extR.mass === 0 ? '—' : Math.round(extR.angle) + '°';
 
     el.machineReadout.classList.toggle('is-balanced', balanced);
+    fitMachineReadout();
+  }
+
+  // Calcula, a partir do espaço realmente disponível na telinha (medido no
+  // DOM, não estimado), o maior tamanho de fonte que cabe sem quebrar linha
+  // nem estourar a altura — assim "INTERNO/EXTERNO" cobrem quase toda a área
+  // da telinha em qualquer largura de tela. Usa uma primeira estimativa pela
+  // altura e depois MEDE a largura real do texto renderizado para corrigir
+  // (em vez de estimar a largura de caractere, o que erra por fonte/zoom).
+  function applyReadoutSize(massSize) {
+    el.machineReadout.style.setProperty('--readout-mass-size', massSize + 'px');
+    el.machineReadout.style.setProperty('--readout-label-size', (massSize * 0.32) + 'px');
+    el.machineReadout.style.setProperty('--readout-led-size', (massSize * 0.3) + 'px');
+    el.machineReadout.style.setProperty('--readout-led-gap', (massSize * 0.18) + 'px');
+  }
+
+  function fitMachineReadout() {
+    var col = el.machineReadout.querySelector('.readout-col');
+    if (!col) return;
+    var rect = col.getBoundingClientRect();
+    var availW = rect.width;
+    var availH = rect.height;
+    if (availW <= 0 || availH <= 0) return;
+
+    var massSize = clamp(availH / 2.4, 9, 34);
+    applyReadoutSize(massSize);
+
+    var w1 = el.dispMassInt.getBoundingClientRect().width;
+    var w2 = el.dispMassExt.getBoundingClientRect().width;
+    var widestText = Math.max(w1, w2);
+    var safeW = availW * 0.94;
+    if (widestText > safeW && widestText > 0) {
+      massSize = massSize * (safeW / widestText);
+    }
+    massSize = clamp(massSize, 9, 34);
+    applyReadoutSize(massSize);
   }
 
   function updateFeedback(prevInt, curInt, prevExt, curExt) {
@@ -938,7 +1157,9 @@
     var balanced = total <= tol;
 
     if (balanced) {
-      setFeedback('Roda balanceada! A soma dos dois planos (' + total + ' g) está dentro da tolerância de ' + tol + ' g.', 'good');
+      var balancedMsg = 'Roda balanceada! A soma dos dois planos (' + total + ' g) está dentro da tolerância de ' + tol + ' g.';
+      setFeedback(balancedMsg, 'good');
+      showBalancedModal(balancedMsg);
       return;
     }
 
@@ -973,6 +1194,29 @@
     if (tone) el.feedback.classList.add('feedback-' + tone);
   }
 
+  function showBalancedModal(msg) {
+    if (!el.balancedModal) return;
+    el.balancedModalMsg.textContent = msg;
+    el.balancedModal.hidden = false;
+    if (el.btnBalancedOk) el.btnBalancedOk.focus();
+  }
+
+  function hideBalancedModal() {
+    if (!el.balancedModal) return;
+    el.balancedModal.hidden = true;
+  }
+
+  function bindBalancedModal() {
+    if (!el.balancedModal) return;
+    el.btnBalancedOk.addEventListener('click', hideBalancedModal);
+    el.balancedModal.addEventListener('click', function (e) {
+      if (e.target === el.balancedModal) hideBalancedModal();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !el.balancedModal.hidden) hideBalancedModal();
+    });
+  }
+
   /* ================================================================
      GERAR EXERCÍCIO (um único botão + menu de padrões de roda)
      ================================================================ */
@@ -1005,9 +1249,10 @@
     var preset = pickPreset();
     var diameterIn = preset.diameters[randInt(0, preset.diameters.length - 1)];
 
+    hideBalancedModal();
     setWheelView('side');
     state.unbalance = generateUnbalance();
-    state.weights = { internal: [], external: [] };
+    state.weights = { internal: { angle: 0, pieces: [] }, external: { angle: 0, pieces: [] } };
     state.selectedWeight = null;
     state.lastReading = { internal: null, external: null };
     state.hasSpun = false;
@@ -1032,8 +1277,6 @@
     el.dispMassInt.textContent = '-- g'; el.dispAngleInt.textContent = '--°';
     el.dispMassExt.textContent = '-- g'; el.dispAngleExt.textContent = '--°';
     setFeedback('Meça a roda e clique em GIRAR para iniciar.', null);
-
-    showToast('Novo exercício: ' + preset.label + '. Meça A, B e D e balanceie os dois planos.');
   }
 
   /* ================================================================
@@ -1050,8 +1293,6 @@
   function setMode(mode) {
     state.mode = mode;
     el.app.dataset.mode = mode;
-    el.modeLearnBtn.setAttribute('aria-pressed', String(mode === 'learn'));
-    el.modeSimBtn.setAttribute('aria-pressed', String(mode === 'sim'));
     renderGuide();
   }
 
@@ -1089,9 +1330,6 @@
   }
 
   function bindEvents() {
-    el.modeLearnBtn.addEventListener('click', function () { setMode('learn'); });
-    el.modeSimBtn.addEventListener('click', function () { setMode('sim'); });
-
     el.btnExercicio.addEventListener('click', generateExercise);
 
     el.btnViewToggle.addEventListener('click', function () {
@@ -1139,7 +1377,20 @@
     el.inputTolerance.addEventListener('input', function () {
       var v = parseInt(el.inputTolerance.value, 10);
       if (isNaN(v)) v = 15;
-      state.tolerance = clamp(v, 5, 40);
+      state.tolerance = clamp(v, 0, 40);
+      if (state.hasSpun) updateDisplay(state.lastReading.internal, state.lastReading.external);
+    });
+
+    // ao terminar de editar (sair do campo/apertar Enter), corrige o valor
+    // exibido pro que realmente vai ser usado (múltiplo de 5, entre 0 e 40)
+    // — sem isso o campo podia mostrar um número (ex.: 3 ou 50) diferente
+    // do valor que a máquina de fato aplicava no cálculo.
+    el.inputTolerance.addEventListener('change', function () {
+      var v = parseInt(el.inputTolerance.value, 10);
+      if (isNaN(v)) v = 15;
+      var applied = clamp(roundToStep(v, 5), 0, 40);
+      state.tolerance = applied;
+      el.inputTolerance.value = String(applied);
       if (state.hasSpun) updateDisplay(state.lastReading.internal, state.lastReading.external);
     });
 
@@ -1178,6 +1429,7 @@
     buildRulerTicks(el.rulerBTicks, FLANGE_X, RULER_B_Y, 1);
     buildAngleTicks();
     buildRefPointer();
+    buildFieldZonesMachine();
     buildGuideTicks();
     buildLedRow(el.ledRowInt);
     buildLedRow(el.ledRowExt);
@@ -1187,7 +1439,28 @@
     generateExercise();
     bindEvents();
     attachRotorDrag();
-    setMode('sim');
+    bindBalancedModal();
+    setMode('learn');
+    fitMachineReadout();
+
+    // A 1ª medida acontece antes da webfont (IBM Plex Mono, carregada via
+    // Google Fonts) terminar de baixar — o texto é medido com a fonte de
+    // reserva do navegador, que tem uma largura diferente. Quando a fonte
+    // "de verdade" entra, o texto pode ficar mais largo que a coluna e
+    // vazar por cima da coluna vizinha. Por isso recalculamos assim que as
+    // fontes terminam de carregar (e de novo num pequeno atraso, para
+    // navegadores sem a Font Loading API).
+    if (window.document && document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(fitMachineReadout).catch(function () {});
+    }
+    setTimeout(fitMachineReadout, 350);
+    setTimeout(fitMachineReadout, 1200);
+
+    var resizeRaf = null;
+    window.addEventListener('resize', function () {
+      if (resizeRaf) cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(fitMachineReadout);
+    });
   }
 
   if (document.readyState === 'loading') {
