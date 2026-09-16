@@ -847,7 +847,7 @@
         li.classList.add('verdict-' + verdict.key);
       }
       var span = document.createElement('span');
-      span.textContent = mass + ' g @ ' + Math.round(wp.angle) + '° / ' + hourLabel(wp.angle);
+      span.textContent = mass + ' g @ ' + Math.round(wp.angle) + '°';
       li.appendChild(span);
       var btn = document.createElement('button');
       btn.type = 'button';
