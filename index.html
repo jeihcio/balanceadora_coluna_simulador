@@ -42,6 +42,27 @@
       </p>
 
       <figure class="machine-figure">
+        <div class="machine-readout" id="machineReadout">
+          <div class="readout-head">
+            <span class="readout-brand">BAL·2D</span>
+            <span class="readout-led" id="statusLed" aria-hidden="true"></span>
+            <span class="readout-status" id="miniStatus">PRONTA</span>
+          </div>
+          <div class="readout-grid">
+            <div class="readout-col">
+              <span class="readout-label">INTERNO</span>
+              <span class="readout-mass" id="dispMassInt">-- g</span>
+              <div class="led-row" id="ledRowInt" role="img" aria-label="Indicador de posição do plano interno"></div>
+              <span class="display-angle-exact" id="dispAngleInt">--°</span>
+            </div>
+            <div class="readout-col">
+              <span class="readout-label">EXTERNO</span>
+              <span class="readout-mass" id="dispMassExt">-- g</span>
+              <div class="led-row" id="ledRowExt" role="img" aria-label="Indicador de posição do plano externo"></div>
+              <span class="display-angle-exact" id="dispAngleExt">--°</span>
+            </div>
+          </div>
+        </div>
         <svg id="machineSvg" viewBox="0 0 960 620" data-wheel-view="side" role="img"
              aria-label="Ilustração da balanceadora de coluna com a roda montada no eixo, vista de lado ou de frente">
           <defs>
@@ -71,16 +92,6 @@
           <!-- coluna -->
           <rect x="60" y="115" width="90" height="445" rx="14" fill="url(#colGrad)" class="column"/>
           <rect x="72" y="115" width="10" height="445" rx="5" class="column-highlight"/>
-
-          <!-- painel de controle -->
-          <rect x="15" y="15" width="210" height="100" rx="10" class="control-housing"/>
-          <rect x="30" y="30" width="112" height="52" rx="4" class="control-screen"/>
-          <text x="36" y="50" class="control-screen-text">BAL·2D</text>
-          <text x="36" y="68" class="control-screen-text control-screen-text--sub" id="miniStatus">PRONTA</text>
-          <circle cx="192" cy="38" r="7" class="control-led" id="statusLed"/>
-          <circle cx="208" cy="38" r="9" class="control-knob"/>
-          <rect x="182" y="56" width="34" height="14" rx="4" class="control-btn"/>
-          <rect x="182" y="76" width="34" height="14" rx="4" class="control-btn"/>
 
           <!-- flange fixa: referência para a medida A -->
           <rect x="150" y="323" width="40" height="24" rx="4" class="flange-stub"/>
@@ -132,6 +143,8 @@
               <circle id="tireCircle" cx="430" cy="335" r="190" class="tire"/>
               <circle id="rimCircle" cx="430" cy="335" r="150" fill="url(#rimGrad)" class="rim"/>
               <g id="spokes"></g>
+              <g id="fieldZonesInternal" class="field-zones"></g>
+              <g id="fieldZonesExternal" class="field-zones"></g>
               <circle id="outerPlaneRing" cx="430" cy="335" r="126" class="plane-ring plane-ring-external"/>
               <circle id="innerPlaneRing" cx="430" cy="335" r="78" class="plane-ring plane-ring-internal"/>
               <circle cx="430" cy="335" r="16" class="hub-cap"/>
@@ -148,6 +161,18 @@
       <div class="view-toggle-row">
         <button type="button" id="btnViewToggle" class="btn btn-outline btn-small">Ver roda de frente</button>
         <span class="view-status" id="viewStatus">Vista lateral (mesma posição de montagem de uma máquina real)</span>
+      </div>
+
+      <p class="callout-tip" data-hint="manual-rotate">
+        Depois de girar, <strong>arraste o pneu</strong> (vista de frente) para rodar a roda manualmente — igual
+        numa máquina de verdade — até as bolinhas do plano acenderem todas no painel de Balanceamento. Ali é o
+        ponto de referência (12h) para colocar o chumbo.
+      </p>
+
+      <div class="zone-legend" aria-hidden="true">
+        <span><span class="zone-swatch zone-swatch-leve"></span>Leve — perto do chumbo</span>
+        <span><span class="zone-swatch zone-swatch-mover"></span>Mover — dos lados</span>
+        <span><span class="zone-swatch zone-swatch-pesado"></span>Pesado — lado oposto</span>
       </div>
 
       <div class="measure-alt">
@@ -168,33 +193,18 @@
           <p class="diameter-readout" id="labelD">D = 17" (431,8 mm)</p>
         </div>
       </div>
-
-      <button type="button" id="btnGirar" class="btn btn-giant">GIRAR / BALANCEAR</button>
-
-      <p class="hint" data-hint="machine-spin">
-        Ao girar, a máquina mede o desbalanceamento atual dos planos interno e externo, considerando todos os
-        chumbos já instalados.
-      </p>
     </section>
 
     <!-- ===================== PAINEL DIREITO: BALANCEAMENTO ===================== -->
     <section class="panel panel-balance" aria-labelledby="balanceTitle">
       <h2 id="balanceTitle" class="panel-title">Balanceamento</h2>
 
-      <div class="display" id="display">
-        <p class="display-title" id="displayTitle">AGUARDANDO</p>
-        <div class="display-grid">
-          <div class="display-col">
-            <span class="display-label">INTERNO</span>
-            <span class="display-mass" id="dispMassInt">-- g</span>
-            <span class="display-angle" id="dispAngleInt">--°</span>
-          </div>
-          <div class="display-col">
-            <span class="display-label">EXTERNO</span>
-            <span class="display-mass" id="dispMassExt">-- g</span>
-            <span class="display-angle" id="dispAngleExt">--°</span>
-          </div>
-        </div>
+      <div class="panel-action">
+        <button type="button" id="btnGirar" class="btn btn-giant">GIRAR / BALANCEAR</button>
+        <p class="hint" data-hint="machine-spin">
+          Ao girar, a máquina mede o desbalanceamento atual dos planos interno e externo, considerando todos os
+          chumbos já instalados.
+        </p>
       </div>
 
       <p class="feedback" id="feedback">Meça a roda e clique em GIRAR para iniciar.</p>
@@ -244,7 +254,7 @@
       </div>
 
       <div class="guide-panel" aria-labelledby="guideTitle">
-        <h3 id="guideTitle" class="guide-title">Guia rápido — onde colocar o chumbo</h3>
+        <h3 id="guideTitle" class="guide-title">Diagrama de campo — leve, pesado ou mover?</h3>
 
         <div class="guide-body">
           <svg id="guideClock" class="guide-clock" viewBox="0 0 170 170" role="img"
@@ -254,18 +264,16 @@
             <text x="85" y="80" text-anchor="middle" dominant-baseline="middle" class="guide-hub">◎</text>
             <g id="guideMarkerExternal" class="guide-marker guide-marker-external"></g>
             <g id="guideMarkerInternal" class="guide-marker guide-marker-internal"></g>
-            <text x="132" y="45" class="guide-rotate-label guide-rotate-advance">⟳ avançar</text>
-            <text x="38" y="45" class="guide-rotate-label guide-rotate-back" text-anchor="end">recuar ⟲</text>
           </svg>
 
           <div class="guide-text">
-            <p class="guide-line guide-line-internal" id="guideTextInternal">Gire a roda para descobrir onde colocar o chumbo interno.</p>
-            <p class="guide-line guide-line-external" id="guideTextExternal">Gire a roda para descobrir onde colocar o chumbo externo.</p>
+            <p class="guide-line guide-line-internal" id="guideTextInternal">Gire a roda até achar o ponto (bolinhas verdes) e coloque o chumbo interno.</p>
+            <p class="guide-line guide-line-external" id="guideTextExternal">Gire a roda até achar o ponto (bolinhas verdes) e coloque o chumbo externo.</p>
             <ul class="guide-legend">
-              <li><strong>12h</strong> = referência da máquina (topo, seta vermelha na roda de frente). Os ângulos crescem no sentido horário: 12h → 3h → 6h → 9h → 12h.</li>
-              <li><strong>Mover ►</strong> avança o chumbo no sentido horário (ângulo aumenta) — use quando o alvo estiver à frente da posição atual.</li>
-              <li><strong>◄ Mover</strong> recua o chumbo no sentido anti-horário (ângulo diminui) — use quando o alvo estiver atrás.</li>
-              <li>Sem chumbo nesse plano ainda? Clique em <strong>+ Chumbo</strong> primeiro, depois use Mover até a bolinha indicada acima.</li>
+              <li class="zone-item zone-item-leve"><strong>Chumbo leve:</strong> ainda falta peso bem no lugar onde ele está — some outro do lado ou troque por um mais pesado.</li>
+              <li class="zone-item zone-item-pesado"><strong>Chumbo pesado:</strong> tem peso sobrando do lado oposto ao chumbo — troque por um mais leve.</li>
+              <li class="zone-item zone-item-mover"><strong>Mover ► / ◄:</strong> o peso está certo, mas o lugar não — avance (horário) ou recue (anti-horário) o chumbo pela roda.</li>
+              <li>Sem chumbo nesse plano ainda? Ache o ponto (bolinhas verdes) e clique em <strong>+ Chumbo</strong> — ele já nasce ali.</li>
             </ul>
           </div>
         </div>

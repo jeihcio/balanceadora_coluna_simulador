@@ -136,6 +136,19 @@
     return ((a % 360) + 360) % 360;
   }
 
+  // "fatia de pizza" (setor preenchido) do centro (cx,cy) até o raio r, de
+  // startDeg a endDeg (sentido horário) — usada pelas zonas do diagrama de
+  // campo, que cobrem a roda toda como uma esfera grande e transparente
+  function describeWedgePath(cx, cy, r, startDeg, endDeg) {
+    var s = ((startDeg % 360) + 360) % 360;
+    var span = ((endDeg - startDeg) % 360 + 360) % 360 || 360;
+    var p1 = polarXY(cx, cy, r, s);
+    var p2 = polarXY(cx, cy, r, s + span);
+    var largeArc = span > 180 ? 1 : 0;
+    return 'M ' + cx + ' ' + cy + ' L ' + p1.x + ' ' + p1.y +
+      ' A ' + r + ' ' + r + ' 0 ' + largeArc + ' 1 ' + p2.x + ' ' + p2.y + ' Z';
+  }
+
   function svgPointFromEvent(svgEl, evt) {
     var pt = svgEl.createSVGPoint();
     pt.x = evt.clientX;
@@ -149,6 +162,28 @@
   function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
   function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
   function planeLabel(p) { return p === 'internal' ? 'interno' : 'externo'; }
+
+  // menor distância angular entre dois ângulos (sempre 0-180, sem sinal)
+  function angularDist(a, b) {
+    var d = Math.abs(a - b) % 360;
+    return d > 180 ? 360 - d : d;
+  }
+
+  // diferença angular COM sinal, de b para a, no intervalo (-180, 180]
+  // positivo = "a" está no sentido horário a partir de "b"
+  function angularSignedDiff(a, b) {
+    var d = (a - b) % 360;
+    if (d < -180) d += 360;
+    if (d > 180) d -= 360;
+    return d;
+  }
+
+  // ângulo (referencial da roda) que está bem no topo (0°, marca REF) agora,
+  // considerando a rotação atual do rotor — é aí que um chumbo novo "nasce"
+  function currentTopWheelAngle() {
+    var rotorMod = ((state.rotorAngleRaw % 360) + 360) % 360;
+    return ((-rotorMod % 360) + 360) % 360;
+  }
 
   /* ================================================================
      REFERÊNCIAS DOM
@@ -167,10 +202,11 @@
       'rulerBTicks', 'calipersLine', 'handleBIn', 'handleBOut', 'labelB',
       'inputA', 'inputB', 'selectD', 'labelD',
       'angleTicks', 'wheelRotor', 'tireCircle', 'rimCircle', 'spokes',
-      'outerPlaneRing', 'innerPlaneRing', 'valveStem', 'targetGhosts',
+      'outerPlaneRing', 'innerPlaneRing', 'fieldZonesInternal', 'fieldZonesExternal', 'valveStem', 'targetGhosts',
       'weightsInternal', 'weightsExternal', 'refPointer',
       'btnGirar', 'miniStatus', 'statusLed',
-      'display', 'displayTitle', 'dispMassInt', 'dispAngleInt', 'dispMassExt', 'dispAngleExt',
+      'machineReadout', 'dispMassInt', 'dispAngleInt', 'dispMassExt', 'dispAngleExt',
+      'ledRowInt', 'ledRowExt',
       'feedback', 'inputTolerance',
       'stepValInt', 'stepValExt', 'listInternal', 'listExternal',
       'guideTicks', 'guideMarkerInternal', 'guideMarkerExternal',
@@ -267,52 +303,61 @@
     });
   }
 
-  // converte um ângulo (0-359°, 0 no topo/12h, sentido horário) numa frase tipo
-  // "no 6h" ou "entre 7h e 8h", para descrever a posição de forma bem simples
-  function angleToClockPhrase(angleDeg) {
-    var hourFloat = (angleDeg / 30) % 12; // 360°/12h = 30° por hora
-    var nearest = Math.round(hourFloat) % 12;
-    var frac = hourFloat - Math.floor(hourFloat);
-    var closeToExact = frac < 0.15 || frac > 0.85;
-    if (closeToExact) {
-      return 'perto do ' + clockLabel(nearest) + 'h';
-    }
-    var lower = Math.floor(hourFloat) % 12;
-    var upper = Math.ceil(hourFloat) % 12;
-    return 'entre ' + clockLabel(lower) + 'h e ' + clockLabel(upper) + 'h';
-  }
-
-  function clockLabel(h) { return h === 0 ? 12 : h; }
-
-  // atualiza o relógio didático + o texto de cada plano com a posição exata
-  // (mesmo alvo calculado por computeRemaining, só que traduzido em palavras)
+  // atualiza o relógio didático + o veredito de cada plano: leve, pesado ou
+  // fora do lugar — o "diagrama de campo" clássico de oficina, comparando o
+  // alvo real (computeRemaining) com o ÚLTIMO chumbo colocado nesse plano.
+  // Em modo Aprendizado também revela o alvo exato (anel tracejado), como
+  // conferência; em Simulação só o veredito (igual numa máquina de verdade).
   function renderGuide() {
     renderGuidePlane('internal', el.guideMarkerInternal, el.guideTextInternal);
     renderGuidePlane('external', el.guideMarkerExternal, el.guideTextExternal);
   }
 
   function renderGuidePlane(plane, markerEl, textEl) {
-    var label = planeLabel(plane);
+    var planeName = plane === 'internal' ? 'Interno' : 'Externo';
+    var list = state.weights[plane];
+
     if (!state.hasSpun) {
       markerEl.innerHTML = '';
-      textEl.textContent = 'Gire a roda para descobrir onde colocar o chumbo ' + label + '.';
+      textEl.innerHTML = '<strong>' + planeName + ':</strong> gire a roda para começar a procurar o ponto.';
       return;
     }
-    var rem = computeRemaining(plane);
-    if (rem.mass === 0) {
+    if (list.length === 0) {
       markerEl.innerHTML = '';
-      textEl.textContent = 'Plano ' + label + ' balanceado — nenhum chumbo a mais é necessário aqui.';
+      textEl.innerHTML = '<strong>' + planeName + ':</strong> gire a roda até as bolinhas acenderem, depois clique em + Chumbo.';
       return;
     }
-    var p = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R, rem.angle);
-    var pLine = polarXY(GUIDE_CX, GUIDE_CY, 10, rem.angle);
-    markerEl.innerHTML =
-      '<line x1="' + pLine.x + '" y1="' + pLine.y + '" x2="' + p.x + '" y2="' + p.y + '" class="guide-marker-line"></line>' +
-      '<circle cx="' + p.x + '" cy="' + p.y + '" r="7" class="guide-marker-dot"></circle>';
-    textEl.innerHTML =
-      '<strong>' + (plane === 'internal' ? 'Interno' : 'Externo') + ':</strong> faltam ' + rem.mass + ' g, ' +
-      angleToClockPhrase(rem.angle) + ' (' + Math.round(rem.angle) + '°). Adicione ou mova o chumbo até a bolinha ' +
-      (plane === 'internal' ? 'azul' : 'laranja') + ' no relógio.';
+
+    var dotsHtml = list.map(function (w) {
+      var p = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R, w.angle);
+      return '<circle cx="' + p.x + '" cy="' + p.y + '" r="6" class="guide-marker-dot"></circle>';
+    }).join('');
+
+    var rem = computeRemaining(plane);
+    var verdictHtml;
+    if (rem.mass === 0) {
+      verdictHtml = 'balanceado — nenhum ajuste a mais necessário.';
+    } else {
+      var ref = list[list.length - 1];
+      var diff = angularDist(rem.angle, ref.angle);
+      var signed = angularSignedDiff(rem.angle, ref.angle);
+      if (diff <= 30) {
+        verdictHtml = '<strong>leve</strong> — ainda faltam ' + rem.mass + ' g bem onde ele está; some outro chumbo do lado ou troque por um mais pesado.';
+      } else if (diff >= 150) {
+        verdictHtml = '<strong>pesado</strong> — tem peso sobrando do lado oposto; troque por um chumbo mais leve.';
+      } else {
+        var dirText = signed > 0 ? 'avance o chumbo (Mover ►)' : 'recue o chumbo (◄ Mover)';
+        verdictHtml = '<strong>fora do lugar</strong> — o peso está OK, mas ' + dirText + '.';
+      }
+      if (state.mode === 'learn') {
+        var pTarget = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R, rem.angle);
+        dotsHtml += '<circle cx="' + pTarget.x + '" cy="' + pTarget.y + '" r="9" class="guide-target-ring"></circle>';
+        verdictHtml += ' <span class="guide-exact">(conferindo: alvo real ' + rem.mass + ' g a ' + Math.round(rem.angle) + '°)</span>';
+      }
+    }
+
+    markerEl.innerHTML = dotsHtml;
+    textEl.innerHTML = '<strong>' + planeName + ':</strong> ' + verdictHtml;
   }
 
   var DIAMETERS_IN = [13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
@@ -472,11 +517,43 @@
     return !!state.selectedWeight && state.selectedWeight.plane === plane && state.selectedWeight.index === idx;
   }
 
+  // faixas translúcidas do diagrama de campo, direto na roda: leve perto do
+  // alvo, pesado do lado oposto, mover nos dois flancos. O centro (ref) é o
+  // ângulo-alvo da ÚLTIMA medição (state.lastReading) — FIXO enquanto você
+  // mexe nos chumbos, só muda quando gira de novo. Colocar/mover um chumbo
+  // não desloca as zonas (senão elas perseguem o próprio chumbo e deixam de
+  // servir de referência).
+  function renderFieldZones() {
+    renderFieldZonesForPlane('internal', el.fieldZonesInternal);
+    renderFieldZonesForPlane('external', el.fieldZonesExternal);
+  }
+
+  function renderFieldZonesForPlane(plane, container) {
+    var reading = state.lastReading[plane];
+    if (!state.hasSpun || !reading || reading.mass === 0) {
+      container.innerHTML = '';
+      return;
+    }
+    var ref = reading.angle; // fixo: alvo da última medição, não do último chumbo
+    var bigR = state.geom.tireR; // cobre a roda inteira (como uma esfera grande por cima), não só o aro
+    var zones = [
+      { from: ref - 30, to: ref + 30, cls: 'field-zone-leve' },
+      { from: ref + 30, to: ref + 150, cls: 'field-zone-mover' },
+      { from: ref + 150, to: ref + 210, cls: 'field-zone-pesado' },
+      { from: ref + 210, to: ref + 330, cls: 'field-zone-mover' }
+    ];
+    container.innerHTML = zones.map(function (z) {
+      var d = describeWedgePath(state.geom.cx, state.geom.cy, bigR, z.from, z.to);
+      return '<path d="' + d + '" class="field-zone ' + z.cls + '"></path>';
+    }).join('');
+  }
+
   function renderWeights() {
     renderWeightGroup('internal', el.weightsInternal, state.geom.innerR);
     renderWeightGroup('external', el.weightsExternal, state.geom.outerR);
     renderWeightLists();
     renderTargetGhosts();
+    renderFieldZones();
     renderGuide();
   }
 
@@ -609,13 +686,37 @@
     });
   }
 
+  // na vida real não dá pra colar dois chumbos exatamente no mesmo ponto:
+  // cada um novo nasce na marca de referência atual (topo) e, se já houver
+  // chumbo bem ali, ele nasce um pouco ao lado (um seguido do outro)
+  function pickWeightAngle(plane) {
+    var base = currentTopWheelAngle();
+    var list = state.weights[plane];
+    var MIN_GAP = 7, STEP = 10;
+    var angle = base;
+    for (var tries = 1; tries <= 20; tries++) {
+      var occupied = list.some(function (w) { return angularDist(w.angle, angle) < MIN_GAP; });
+      if (!occupied) break;
+      var dir = tries % 2 === 1 ? 1 : -1;
+      var mag = Math.ceil(tries / 2) * STEP;
+      angle = ((base + dir * mag) % 360 + 360) % 360;
+    }
+    return angle;
+  }
+
   function addWeight(plane) {
     setWheelView('front');
     var mass = state.pendingMass[plane];
-    state.weights[plane].push({ mass: mass, angle: 180 });
+    var angle = pickWeightAngle(plane);
+    var nudged = angularDist(angle, currentTopWheelAngle()) > 0.01;
+    state.weights[plane].push({ mass: mass, angle: angle });
     state.selectedWeight = { plane: plane, index: state.weights[plane].length - 1 };
     renderWeights();
-    setFeedback('Chumbo de ' + mass + ' g adicionado no plano ' + planeLabel(plane) + '. Posicione-o e gire a roda para medir novamente.', 'neutral');
+    setFeedback(
+      'Chumbo de ' + mass + ' g adicionado no plano ' + planeLabel(plane) + ', na marca de referência (topo)' +
+      (nudged ? ', deslocado um pouco do chumbo vizinho' : '') + '. Gire a roda para medir de novo.',
+      'neutral'
+    );
   }
 
   function removeWeight(plane) {
@@ -666,6 +767,8 @@
       var t = Math.min(1, (now - start) / duration);
       var deg = fromDeg + (toDeg - fromDeg) * easeOutCubic(t);
       el.wheelRotor.setAttribute('transform', 'rotate(' + deg + ' ' + state.geom.cx + ' ' + state.geom.cy + ')');
+      state.rotorAngleRaw = deg;
+      updateLeds();
       if (t < 1) requestAnimationFrame(frame);
       else onDone();
     }
@@ -675,6 +778,98 @@
   function setStatusLed(busy) {
     el.statusLed.classList.toggle('busy', busy);
     el.miniStatus.textContent = busy ? 'GIRANDO...' : 'PRONTA';
+  }
+
+  /* ================================================================
+     BOLINHAS DE POSIÇÃO (como o visor de LEDs de uma balanceadora real)
+     Em vez de mostrar o ângulo exato, o simulador mede o quão perto a
+     marca do topo (REF 0°) está do ponto certo do plano; o usuário
+     descobre o lugar girando a roda manualmente até acender tudo.
+     ================================================================ */
+  var LED_COUNT = 5;
+
+  function ledsForDiff(absDiff) {
+    if (absDiff <= 2) return 5;
+    if (absDiff <= 6) return 4;
+    if (absDiff <= 14) return 3;
+    if (absDiff <= 26) return 2;
+    if (absDiff <= 45) return 1;
+    return 0;
+  }
+
+  function buildLedRow(container) {
+    container.innerHTML = '';
+    for (var i = 0; i < LED_COUNT; i++) {
+      var dot = document.createElement('span');
+      dot.className = 'led-dot';
+      container.appendChild(dot);
+    }
+  }
+
+  function setLedRow(container, lit) {
+    Array.prototype.forEach.call(container.children, function (dot, i) {
+      dot.classList.toggle('lit', i < lit);
+      dot.classList.toggle('lit-full', lit === LED_COUNT && i < lit);
+    });
+  }
+
+  // as bolinhas seguem a ÚLTIMA medição (state.lastReading), não o alvo "ao
+  // vivo" — igual numa máquina real, que só atualiza a leitura girando de
+  // novo. Só girar a roda manualmente (rotorAngleRaw) mexe nas bolinhas;
+  // colocar/mover um chumbo não altera a leitura até o próximo GIRAR.
+  function updateLeds() {
+    if (!state.hasSpun) {
+      setLedRow(el.ledRowInt, 0);
+      setLedRow(el.ledRowExt, 0);
+      return;
+    }
+    var top = currentTopWheelAngle();
+    ['internal', 'external'].forEach(function (plane) {
+      var container = plane === 'internal' ? el.ledRowInt : el.ledRowExt;
+      var reading = state.lastReading[plane];
+      var lit = reading.mass === 0 ? LED_COUNT : ledsForDiff(angularDist(top, reading.angle));
+      setLedRow(container, lit);
+    });
+  }
+
+  // gira a roda "na mão", arrastando qualquer parte dela (pneu OU aro/aro
+  // metálico) — igual numa máquina real, onde depois do motor parar você
+  // mesmo rotaciona a roda até achar o ponto. Os chumbos (desenhados por
+  // cima, com seu próprio arraste) continuam tendo prioridade quando
+  // agarrados diretamente neles.
+  function attachRotorDragToEl(triggerEl) {
+    var dragging = false;
+    var lastAngle = 0;
+    triggerEl.addEventListener('pointerdown', function (e) {
+      if (state.spinning) return;
+      dragging = true;
+      try { triggerEl.setPointerCapture(e.pointerId); } catch (_) {}
+      var pt = svgPointFromEvent(el.machineSvg, e);
+      lastAngle = angleFromPoint(state.geom.cx, state.geom.cy, pt.x, pt.y);
+      e.preventDefault();
+    });
+    triggerEl.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      var pt = svgPointFromEvent(el.machineSvg, e);
+      var angleNow = angleFromPoint(state.geom.cx, state.geom.cy, pt.x, pt.y);
+      var delta = ((angleNow - lastAngle + 540) % 360) - 180; // caminho mais curto
+      state.rotorAngleRaw += delta;
+      lastAngle = angleNow;
+      el.wheelRotor.setAttribute('transform', 'rotate(' + state.rotorAngleRaw + ' ' + state.geom.cx + ' ' + state.geom.cy + ')');
+      updateLeds();
+    });
+    function end(e) {
+      if (!dragging) return;
+      dragging = false;
+      try { triggerEl.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+    triggerEl.addEventListener('pointerup', end);
+    triggerEl.addEventListener('pointercancel', end);
+  }
+
+  function attachRotorDrag() {
+    attachRotorDragToEl(el.tireCircle);
+    attachRotorDragToEl(el.rimCircle);
   }
 
   function handleGirar() {
@@ -719,6 +914,8 @@
     state.lastReading = { internal: curInt, external: curExt };
     state.hasSpun = true;
     renderTargetGhosts();
+    renderFieldZones();
+    updateLeds();
     renderGuide();
   }
 
@@ -732,13 +929,7 @@
     el.dispMassExt.textContent = extR.mass + ' g';
     el.dispAngleExt.textContent = extR.mass === 0 ? '—' : Math.round(extR.angle) + '°';
 
-    if (balanced) {
-      el.displayTitle.textContent = 'RODA OK — BALANCEADA';
-      el.display.classList.add('is-balanced');
-    } else {
-      el.displayTitle.textContent = 'NOVA MEDIÇÃO';
-      el.display.classList.remove('is-balanced');
-    }
+    el.machineReadout.classList.toggle('is-balanced', balanced);
   }
 
   function updateFeedback(prevInt, curInt, prevExt, curExt) {
@@ -835,9 +1026,9 @@
     updateWheelGeometry();
     renderMeasureFigure();
     renderWeights();
+    updateLeds();
 
-    el.displayTitle.textContent = 'AGUARDANDO';
-    el.display.classList.remove('is-balanced');
+    el.machineReadout.classList.remove('is-balanced');
     el.dispMassInt.textContent = '-- g'; el.dispAngleInt.textContent = '--°';
     el.dispMassExt.textContent = '-- g'; el.dispAngleExt.textContent = '--°';
     setFeedback('Meça a roda e clique em GIRAR para iniciar.', null);
@@ -861,6 +1052,7 @@
     el.app.dataset.mode = mode;
     el.modeLearnBtn.setAttribute('aria-pressed', String(mode === 'learn'));
     el.modeSimBtn.setAttribute('aria-pressed', String(mode === 'sim'));
+    renderGuide();
   }
 
   function makeDraggable(handleEl, opts) {
@@ -987,11 +1179,14 @@
     buildAngleTicks();
     buildRefPointer();
     buildGuideTicks();
+    buildLedRow(el.ledRowInt);
+    buildLedRow(el.ledRowExt);
     updateWheelGeometry();
     setWheelView('side');
     el.machineSvg.setAttribute('data-wheel-view', 'side');
     generateExercise();
     bindEvents();
+    attachRotorDrag();
     setMode('sim');
   }
 

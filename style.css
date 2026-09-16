@@ -25,6 +25,10 @@
   --accent-amber:#cf9200;
   --focus:#2f6fed;
 
+  --zone-leve:rgba(59,130,246,.16);
+  --zone-mover:rgba(245,158,11,.16);
+  --zone-pesado:rgba(220,38,38,.16);
+
   --shadow:0 10px 26px rgba(30,25,20,.10);
   --radius-lg:16px;
   --radius-md:10px;
@@ -162,6 +166,18 @@ h1,h2,h3{margin:0;}
 }
 [data-mode="sim"] .hint{display:none;}
 
+.callout-tip{
+  background:var(--surface-2);border-left:3px solid var(--accent-green);border-radius:7px;
+  padding:9px 11px;font-size:.8rem;color:var(--text-muted);line-height:1.4;
+}
+
+.zone-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:.76rem;color:var(--text-muted);}
+.zone-legend span{display:inline-flex;align-items:center;gap:6px;}
+.zone-swatch{width:12px;height:12px;border-radius:50%;display:inline-block;}
+.zone-swatch-leve{background:var(--zone-leve);}
+.zone-swatch-mover{background:var(--zone-mover);}
+.zone-swatch-pesado{background:var(--zone-pesado);}
+
 /* ---------- máquina / roda / medição (painel unificado) ---------- */
 .machine-figure{margin:0;}
 #machineSvg{width:100%;height:auto;display:block;max-height:74vh;}
@@ -171,15 +187,24 @@ h1,h2,h3{margin:0;}
 .base-bolt{fill:var(--black-part);}
 .column{stroke:var(--red-dark);stroke-width:2;}
 .column-highlight{fill:rgba(255,255,255,.18);}
-.control-housing{fill:var(--black-part);stroke:var(--metal-dark);stroke-width:2;}
-.control-screen{fill:var(--lcd-bg);stroke:var(--metal-dark);stroke-width:1;}
-.control-screen-text{fill:var(--lcd-fg);font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:700;}
-.control-screen-text--sub{font-size:9px;font-weight:600;fill:var(--lcd-fg-dim);}
-.control-led{fill:var(--accent-green);}
-.control-led.busy{fill:var(--accent-amber);}
-.control-knob{fill:var(--metal);stroke:var(--metal-dark);stroke-width:1;}
-.control-btn{fill:var(--metal-dark);}
 .flange-stub{fill:var(--metal-dark);stroke:var(--black-part);stroke-width:1;}
+
+/* ---------- visor da máquina (BAL·2D): status + leitura interno/externo ---------- */
+.machine-readout{
+  background:var(--lcd-bg);color:var(--lcd-fg);border-radius:var(--radius-md);
+  padding:12px 14px;margin-bottom:10px;font-family:"IBM Plex Mono",monospace;
+  box-shadow:inset 0 0 0 2px var(--black-part);
+}
+.readout-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.readout-brand{font-weight:700;font-size:.85rem;letter-spacing:.03em;}
+.readout-led{width:9px;height:9px;border-radius:50%;background:var(--accent-green);display:inline-block;flex:0 0 auto;}
+.readout-led.busy{background:var(--accent-amber);}
+.readout-status{font-size:.68rem;color:var(--lcd-fg-dim);font-weight:600;letter-spacing:.08em;margin-left:auto;}
+.readout-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:center;}
+.readout-col{display:flex;flex-direction:column;gap:2px;}
+.readout-label{display:block;font-size:.64rem;letter-spacing:.12em;color:var(--lcd-fg-dim);}
+.readout-mass{display:block;font-size:1.35rem;font-weight:700;font-variant-numeric:tabular-nums;}
+.machine-readout.is-balanced{box-shadow:inset 0 0 0 2px var(--black-part), 0 0 0 2px var(--accent-green);}
 
 .label{font-family:"IBM Plex Mono",monospace;fill:var(--text-muted);font-size:11px;}
 .label-plane{font-size:10.5px;font-weight:600;}
@@ -222,8 +247,18 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
   transform:scaleX(0.04);opacity:0;pointer-events:none;
 }
 
-.tire{fill:var(--black-part);}
-.rim{stroke:var(--metal-dark);stroke-width:3;}
+.tire{fill:var(--black-part);cursor:grab;touch-action:none;}
+.tire:active{cursor:grabbing;}
+
+/* zonas do "diagrama de campo": cobrem a roda toda (como uma esfera grande
+   por cima, bem transparente), centradas no último chumbo de cada plano */
+.field-zones{pointer-events:none;}
+.field-zone{stroke:none;pointer-events:none;}
+.field-zone-leve{fill:var(--zone-leve);}
+.field-zone-mover{fill:var(--zone-mover);}
+.field-zone-pesado{fill:var(--zone-pesado);}
+.rim{stroke:var(--metal-dark);stroke-width:3;cursor:grab;touch-action:none;}
+.rim:active{cursor:grabbing;}
 .spoke{stroke:var(--metal-dark);stroke-width:4;stroke-linecap:round;opacity:.5;}
 .plane-ring{fill:none;stroke-width:2;stroke-dasharray:6 5;}
 .plane-ring-internal{stroke:var(--accent-blue);}
@@ -264,20 +299,22 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 .numfield input:focus-visible,.numfield select:focus-visible{outline:2px solid var(--focus);outline-offset:1px;}
 .diameter-readout{font-family:"IBM Plex Mono",monospace;font-weight:700;font-size:.92rem;margin:0;padding:7px 0;}
 
-/* ---------- display / balanceamento ---------- */
-.display{
-  background:var(--lcd-bg);color:var(--lcd-fg);border-radius:var(--radius-md);padding:16px;
-  font-family:"IBM Plex Mono",monospace;box-shadow:inset 0 0 0 2px var(--black-part);
+/* ---------- balanceamento (coluna direita) ---------- */
+.panel-action{
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);
+  padding:14px;display:flex;flex-direction:column;gap:10px;
 }
-.display-title{
-  text-align:center;letter-spacing:.18em;font-size:.78rem;color:var(--lcd-fg-dim);margin:0 0 10px;
-  font-weight:600;
+
+.led-row{display:flex;justify-content:center;gap:5px;margin-top:6px;}
+.led-dot{
+  width:12px;height:12px;border-radius:50%;background:rgba(124,251,155,.12);
+  border:1px solid var(--lcd-fg-dim);transition:background .12s ease,box-shadow .12s ease;
 }
-.display.is-balanced .display-title{color:var(--lcd-fg);}
-.display-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:center;}
-.display-label{display:block;font-size:.68rem;letter-spacing:.14em;color:var(--lcd-fg-dim);}
-.display-mass{display:block;font-size:1.7rem;font-weight:700;font-variant-numeric:tabular-nums;}
-.display-angle{display:block;font-size:1.05rem;opacity:.85;font-variant-numeric:tabular-nums;}
+.led-dot.lit{background:var(--lcd-fg);box-shadow:0 0 6px var(--lcd-fg);border-color:var(--lcd-fg);}
+.led-dot.lit-full{background:#baffc9;box-shadow:0 0 9px 2px var(--lcd-fg);border-color:#baffc9;}
+
+.display-angle-exact{display:block;font-size:.82rem;opacity:.75;font-variant-numeric:tabular-nums;margin-top:4px;}
+[data-mode="sim"] .display-angle-exact{display:none;}
 
 .feedback{
   margin:0;font-size:.86rem;padding:10px 12px;border-radius:8px;background:var(--surface-2);
@@ -365,9 +402,17 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 .guide-marker-dot{stroke:var(--black-part);stroke-width:1.5;}
 .guide-marker-internal .guide-marker-dot{fill:var(--accent-blue);}
 .guide-marker-external .guide-marker-dot{fill:var(--accent-orange);}
+.guide-target-ring{fill:none;stroke-width:2;stroke-dasharray:3 3;opacity:.8;}
+.guide-marker-internal .guide-target-ring{stroke:var(--accent-blue);}
+.guide-marker-external .guide-target-ring{stroke:var(--accent-orange);}
+.guide-exact{color:var(--text-muted);font-style:italic;}
 
 .guide-text{flex:1 1 200px;min-width:0;display:flex;flex-direction:column;gap:8px;}
 .guide-line{margin:0;font-size:.82rem;line-height:1.4;padding:6px 9px;border-radius:7px;background:var(--surface);border-left:3px solid var(--metal);}
 .guide-line-internal{border-left-color:var(--accent-blue);}
 .guide-line-external{border-left-color:var(--accent-orange);}
 .guide-legend{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:.74rem;color:var(--text-muted);line-height:1.4;}
+.zone-item{list-style:none;margin-left:-18px;padding-left:12px;border-left:3px solid transparent;}
+.zone-item-leve{border-left-color:var(--zone-leve);}
+.zone-item-mover{border-left-color:var(--zone-mover);}
+.zone-item-pesado{border-left-color:var(--zone-pesado);}
