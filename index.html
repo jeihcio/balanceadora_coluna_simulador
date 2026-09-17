@@ -1,3 +1,5 @@
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Balanceadora Didática — Simulador de Balanceamento de Coluna</title>
 <meta name="description" content="Simulador 2D de balanceadora de coluna: meça a roda, gire, leia o desbalanceamento e coloque o chumbo no lugar certo — direto no navegador, sem instalar nada.">
 
@@ -31,7 +33,7 @@
     <div class="topbar-controls">
       <div class="tolerance-row">
         <label for="inputTolerance">Tolerância de balanceamento (soma dos dois planos)</label>
-        <input type="number" id="inputTolerance" min="0" max="40" step="5" value="15">
+        <input type="number" id="inputTolerance" min="0" max="40" step="5" value="0">
         <span>g</span>
       </div>
       <div class="exercise-group">
@@ -56,7 +58,8 @@
         chumbos a roda vira <strong>de frente</strong> automaticamente.
       </p>
 
-      <figure class="machine-figure">
+      <div class="figure-row">
+      <figure class="machine-figure" id="machineFigure">
         <div class="machine-readout" id="machineReadout">
           <div class="readout-grid">
             <div class="readout-col">
@@ -173,6 +176,16 @@
         </svg>
       </figure>
 
+      <div class="rotate-control" id="rotateControl">
+        <span class="rotate-control-label" aria-hidden="true">Girar</span>
+        <div class="rotate-track" id="rotateTrack" role="slider" tabindex="0"
+             aria-label="Girar a roda manualmente: arraste para cima ou para baixo até achar o ponto (bolinhas verdes)"
+             aria-valuemin="-180" aria-valuemax="180" aria-valuenow="0">
+          <div class="rotate-thumb" id="rotateThumb"></div>
+        </div>
+      </div>
+      </div>
+
       <div class="view-toggle-row">
         <button type="button" id="btnViewToggle" class="btn btn-outline btn-small">Ver roda de frente</button>
         <span class="view-status" id="viewStatus">Vista lateral (mesma posição de montagem de uma máquina real)</span>
@@ -191,14 +204,30 @@
       </div>
 
       <div class="measure-alt">
-        <label class="numfield">
-          <span>A (mm)</span>
-          <input type="number" id="inputA" min="50" max="300" step="1">
-        </label>
-        <label class="numfield">
-          <span>B (mm)</span>
-          <input type="number" id="inputB" min="50" max="300" step="1">
-        </label>
+        <div class="numfield">
+          <label for="inputA">A (mm)</label>
+          <div class="nudge-row">
+            <button type="button" class="nudge-btn" data-nudge-target="A" data-nudge-dir="-1" aria-label="Diminuir régua A">−</button>
+            <input type="number" id="inputA" min="50" max="300" step="1">
+            <button type="button" class="nudge-btn" data-nudge-target="A" data-nudge-dir="1" aria-label="Aumentar régua A">+</button>
+          </div>
+        </div>
+        <div class="numfield">
+          <label for="inputBIn">Início de B (mm)</label>
+          <div class="nudge-row">
+            <button type="button" class="nudge-btn" data-nudge-target="BIn" data-nudge-dir="-1" aria-label="Mover ponta interna da régua B para dentro">−</button>
+            <input type="number" id="inputBIn" min="0" max="300" step="1">
+            <button type="button" class="nudge-btn" data-nudge-target="BIn" data-nudge-dir="1" aria-label="Mover ponta interna da régua B para fora">+</button>
+          </div>
+        </div>
+        <div class="numfield">
+          <label for="inputB">B (mm)</label>
+          <div class="nudge-row">
+            <button type="button" class="nudge-btn" data-nudge-target="B" data-nudge-dir="-1" aria-label="Diminuir régua B">−</button>
+            <input type="number" id="inputB" min="50" max="300" step="1">
+            <button type="button" class="nudge-btn" data-nudge-target="B" data-nudge-dir="1" aria-label="Aumentar régua B">+</button>
+          </div>
+        </div>
         <label class="numfield" for="selectD">
           <span>Diâmetro (D)</span>
           <select id="selectD"></select>
@@ -221,6 +250,13 @@
       </p>
 
       <p class="feedback" id="feedback">Meça a roda e clique em GIRAR para iniciar.</p>
+
+      <label class="easy-mode-row" for="chkEasyMode">
+        <input type="checkbox" id="chkEasyMode" checked>
+        <span><strong>Modo fácil</strong> — chumbo novo já nasce colado bem em cima do último chumbo desse plano, e mover qualquer um deles move o bloco inteiro junto.
+          <small>Desmarque para o chumbo novo nascer do lado do último (metade sobreposta nele) e poder arrastar cada chumbo individualmente pra onde quiser — inclusive bem em cima de outro ou bem longe — sem afetar os demais.</small>
+        </span>
+      </label>
 
       <div class="weight-panels">
         <div class="weight-panel" data-plane="internal">

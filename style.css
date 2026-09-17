@@ -79,6 +79,9 @@ body{
   color:var(--text);
   font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
   padding:20px 16px 40px;
+  padding-left:max(16px, env(safe-area-inset-left));
+  padding-right:max(16px, env(safe-area-inset-right));
+  padding-bottom:max(40px, env(safe-area-inset-bottom));
 }
 
 .app{max-width:1520px;margin:0 auto;display:flex;flex-direction:column;gap:16px;}
@@ -170,8 +173,72 @@ h1,h2,h3{margin:0;}
 .zone-swatch-pesado{background:var(--red);}
 
 /* ---------- máquina / roda / medição (painel unificado) ---------- */
-.machine-figure{margin:0;position:relative;}
-#machineSvg{width:100%;height:auto;display:block;max-height:74vh;}
+/* o limite de altura (pra não estourar telas largas-e-baixas) precisa
+   estar aqui, na FIGURE (que é quem posiciona a telinha INTERNO/EXTERNO
+   por %), e não só no <svg>. Antes ele só limitava a altura do <svg>
+   (max-height), sem mexer na largura: a caixa do SVG ficava mais larga
+   que o próprio desenho (que preserva a proporção 960x620 sozinho, via
+   preserveAspectRatio) — o desenho encolhia centralizado ("letterbox")
+   dentro dessa caixa larga demais, mas a telinha (uma <div> HTML por
+   cima, posicionada em % da FIGURE) continuava usando a caixa inteira
+   como referência, ficando maior e desalinhada da telinha desenhada no
+   SVG. Limitando a largura da FIGURE (convertendo os mesmos 74vh pra um
+   max-width equivalente) e deixando o <svg> sempre 100% dela, a caixa do
+   SVG nunca fica com uma proporção diferente da figure, então as duas
+   sempre casam e não sobra faixa vazia nenhuma. */
+.machine-figure{margin:0;position:relative;max-width:calc(74vh * 960 / 620);flex:1 1 auto;min-width:0;}
+#machineSvg{width:100%;height:auto;display:block;}
+
+/* .figure-row só existe pra colocar o controle de girar (rotate-control)
+   ENCOSTADO no desenho, sem mexer no cálculo de tamanho do .machine-figure
+   acima (que já é delicado — ver comentário mais abaixo). Como o figure
+   agora é flex:1 1 auto dentro dessa linha, ele continua se ajustando pela
+   MESMA regra de sempre (max-width baseado em 74vh, largura 100% do espaço
+   que sobra) — só que "o espaço que sobra" agora já desconta a faixinha do
+   controle de girar. */
+.figure-row{display:flex;align-items:flex-start;gap:8px;}
+
+/* controle de girar a roda: só existe/aparece na vista de frente (é quando
+   girar faz sentido) — ver JS (setWheelView). A altura dele é escrita em
+   JS (syncRotateControlHeight), igual à altura real do .machine-figure —
+   os dois têm que bater certinho pro range preencher a mesma faixa vertical
+   do desenho ao lado, sem "stretch" do flexbox (que, testado, criava um
+   loop de altura e deixava o range gigante, esticando a página toda). */
+.rotate-control{
+  flex:0 0 auto;display:none;flex-direction:column;align-items:center;justify-content:center;
+  gap:6px;width:34px;
+  /* empurra o controle pro fim da linha (.figure-row): o desenho tem sua
+     própria largura máxima (baseada na altura da tela) e, quando ela é
+     menor que o espaço disponível, sobrava um vão vazio ENTRE o desenho e
+     o controle de girar em vez do controle ficar colado na borda direita. */
+  margin-left:auto;
+}
+.rotate-control.is-visible{display:flex;}
+.rotate-control-label{font-size:.62rem;color:var(--text-muted);text-align:center;line-height:1.15;white-space:nowrap;}
+
+/* controle de girar, feito com <div>s comuns (trilho + bolinha) em vez de
+   estilizar um <input type="range"> nativo na vertical. Testamos o range
+   nativo (truque writing-mode+direction) e a bolinha saía do centro em
+   pelo menos um navegador/aparelho, de um jeito que não dava pra prever
+   nem reproduzir aqui pra corrigir com certeza — é um comportamento que
+   varia entre motores de renderização, sem solução 100% confiável em CSS.
+   Com <div>s simples, a posição da bolinha é só matemática de posição
+   absoluta (left:50%; translateX(-50%)) — sempre centralizada, em
+   qualquer navegador, sem exceção. */
+.rotate-track{
+  position:relative;width:6px;flex:1 1 auto;
+  background:var(--border);border-radius:999px;
+  cursor:pointer;touch-action:none;
+}
+.rotate-track.disabled{opacity:.4;cursor:default;pointer-events:none;}
+.rotate-track:focus-visible{outline:2px solid var(--focus);outline-offset:4px;border-radius:999px;}
+.rotate-thumb{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:24px;height:24px;border-radius:50%;
+  background:var(--red);border:2px solid var(--red-dark);
+  cursor:grab;
+}
+.rotate-track:active .rotate-thumb{cursor:grabbing;background:var(--red-dark);}
 
 .base-shadow{fill:rgba(0,0,0,.16);}
 .base-block{fill:var(--metal-dark);stroke:var(--black-part);stroke-width:1;}
@@ -208,10 +275,25 @@ h1,h2,h3{margin:0;}
 .readout-mass{display:block;font-size:var(--readout-mass-size);font-weight:700;font-variant-numeric:tabular-nums;line-height:1;white-space:nowrap;}
 .machine-readout.is-balanced{box-shadow:inset 0 0 0 1px var(--black-part), 0 0 0 1px var(--accent-green);}
 
-.label{font-family:"IBM Plex Mono",monospace;fill:var(--text-muted);font-size:11px;}
-.label-plane{font-size:10.5px;font-weight:600;}
-.label-value{font-size:15px;font-weight:700;fill:var(--text);}
-.label-ref{font-size:9.5px;letter-spacing:.04em;}
+/* textos DENTRO do <svg> da máquina usam unidades do viewBox (960x620),
+   então encolhem junto com o desenho inteiro: numa tela de celular (onde
+   o desenho pode renderizar bem menor que os 960 "pixels" do viewBox),
+   um texto de "11px" nessas unidades vira só uns 3-4px reais na tela —
+   ilegível. --svg-scale (calculado em JS a partir da largura real do
+   <svg> ÷ 960, em updateSvgTextScale) corrige isso: o tamanho em
+   unidades do viewBox cresce na proporção inversa da redução do
+   desenho, então o texto acaba sempre com uns bons px reais na tela.
+   O min(...) trava um teto (3x o tamanho base) pra essa compensação não
+   deixar o texto gigante nem colidir com o resto do desenho em telas
+   MUITO pequenas — sem o teto, a compensação seria perfeita mas o rótulo
+   ocuparia espaço demais perto de telas de 300px de largura. */
+.label{font-family:"IBM Plex Mono",monospace;fill:var(--text-muted);font-size:min(33px, calc(11px / var(--svg-scale, 1)));}
+/* teto de 2x aqui (não 3x): "INTERNO"/"EXTERNO" são palavras compridas e,
+   quando os dois planos estão próximos na régua, um teto maior faz elas
+   colidirem antes mesmo do desenho todo ficar minúsculo. */
+.label-plane{font-size:min(21px, calc(10.5px / var(--svg-scale, 1)));font-weight:600;}
+.label-value{font-size:min(45px, calc(15px / var(--svg-scale, 1)));font-weight:700;fill:var(--text);}
+.label-ref{font-size:min(28.5px, calc(9.5px / var(--svg-scale, 1)));letter-spacing:.04em;}
 
 /* ----- vista lateral (padrão) ----- */
 #wheelSideFlip{
@@ -231,7 +313,10 @@ svg[data-wheel-view="front"] #wheelSideFlip{
 .ruler-line{stroke:var(--metal-dark);stroke-width:4;stroke-linecap:round;}
 .ruler-line.contact{stroke:var(--accent-green);}
 .tick-line{stroke:var(--border);stroke-width:1;}
-.tick-text{font-family:"IBM Plex Mono",monospace;fill:var(--text-muted);font-size:9px;}
+/* teto de só 2x (não 3x) aqui: os números da régua ficam bem próximos
+   uns dos outros (a cada 50mm), então um teto maior faz eles colidirem
+   numa tela pequena antes mesmo do desenho todo ficar minúsculo. */
+.tick-text{font-family:"IBM Plex Mono",monospace;fill:var(--text-muted);font-size:min(18px, calc(9px / var(--svg-scale, 1)));}
 
 .handle{cursor:grab;touch-action:none;}
 .handle:active{cursor:grabbing;}
@@ -274,16 +359,16 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 .field-zone-arrow-head{fill:var(--accent-amber);stroke:var(--black-part);stroke-width:.5;stroke-opacity:.3;}
 .field-weight-icon circle{fill:var(--metal-dark);stroke:var(--black-part);stroke-width:1.5;}
 .field-weight-icon text{
-  fill:#fff;font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:15px;
+  fill:#fff;font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:min(45px, calc(15px / var(--svg-scale, 1)));
   text-anchor:middle;dominant-baseline:central;pointer-events:none;
 }
 
 .ref-pointer polygon{fill:var(--red);transition:fill .15s ease;}
 .ref-pointer.aligned polygon{fill:var(--accent-green);}
-.ref-pointer text{fill:var(--text-muted);font-family:"IBM Plex Mono",monospace;font-size:10px;}
+.ref-pointer text{fill:var(--text-muted);font-family:"IBM Plex Mono",monospace;font-size:min(30px, calc(10px / var(--svg-scale, 1)));}
 
 .angle-tick line{stroke:var(--border);stroke-width:1.5;}
-.angle-tick text{fill:var(--text-muted);font-family:"IBM Plex Mono",monospace;font-size:11px;}
+.angle-tick text{fill:var(--text-muted);font-family:"IBM Plex Mono",monospace;font-size:min(22px, calc(11px / var(--svg-scale, 1)));}
 
 .weight-marker{cursor:grab;touch-action:none;}
 .weight-marker:active{cursor:grabbing;}
@@ -291,12 +376,12 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 .weight-marker.internal circle{fill:var(--accent-blue);}
 .weight-marker.external circle{fill:var(--accent-orange);}
 .weight-marker.selected circle{stroke:var(--red);stroke-width:3;}
-.weight-marker text{fill:#fff;font-family:"IBM Plex Mono",monospace;font-size:9px;font-weight:700;text-anchor:middle;dominant-baseline:central;pointer-events:none;}
+.weight-marker text{fill:#fff;font-family:"IBM Plex Mono",monospace;font-size:min(27px, calc(9px / var(--svg-scale, 1)));font-weight:700;text-anchor:middle;dominant-baseline:central;pointer-events:none;}
 
 .target-ghost line{stroke-dasharray:3 4;stroke-width:1.5;}
 .target-ghost.internal{stroke:var(--accent-blue);}
 .target-ghost.external{stroke:var(--accent-orange);}
-.target-ghost text{font-family:"IBM Plex Mono",monospace;font-size:9px;fill:var(--text-muted);}
+.target-ghost text{font-family:"IBM Plex Mono",monospace;font-size:min(27px, calc(9px / var(--svg-scale, 1)));fill:var(--text-muted);}
 
 /* ----- controles abaixo do desenho ----- */
 .view-toggle-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;}
@@ -308,6 +393,11 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
   font-family:"IBM Plex Mono",monospace;font-size:.9rem;padding:7px 8px;border-radius:7px;
   border:1px solid var(--border);background:var(--surface);color:var(--text);width:100%;
 }
+/* régua A/B: botões −/+ ao lado do campo numérico, pra ajustar sem precisar
+   arrastar a seta no desenho nem digitar no teclado — o campo continua
+   igual (ainda dá pra digitar direto), os botões só chamam a mesma lógica. */
+.nudge-row{display:flex;align-items:center;gap:6px;}
+.nudge-row input{flex:1;min-width:0;text-align:center;}
 .numfield input:focus-visible,.numfield select:focus-visible{outline:2px solid var(--focus);outline-offset:1px;}
 .diameter-readout{font-family:"IBM Plex Mono",monospace;font-weight:700;font-size:.92rem;margin:0;padding:7px 0;}
 
@@ -343,10 +433,17 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
   border:1px solid var(--border);background:var(--surface);color:var(--text);
 }
 
-.weight-panels{display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:12px;}
-@media (max-width:420px){
-  .weight-panels{grid-template-columns:minmax(0,1fr);}
+.easy-mode-row{
+  display:flex;align-items:flex-start;gap:9px;cursor:pointer;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);
+  padding:9px 11px;font-size:.8rem;color:var(--text);line-height:1.4;
 }
+.easy-mode-row input{
+  flex:0 0 auto;width:17px;height:17px;margin-top:1px;accent-color:var(--accent-blue);cursor:pointer;
+}
+.easy-mode-row small{display:block;margin-top:2px;color:var(--text-muted);font-size:.74rem;font-weight:400;}
+
+.weight-panels{display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:12px;}
 .weight-panel{
   min-width:0;
   background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);
@@ -361,11 +458,11 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 }
 
 .stepper{display:flex;align-items:center;justify-content:center;gap:8px;}
-.stepper-btn{
+.stepper-btn,.nudge-btn{
   width:32px;height:32px;flex:0 0 auto;border-radius:8px;border:1px solid var(--border);background:var(--surface);
   font-size:1.1rem;line-height:1;cursor:pointer;color:var(--text);
 }
-.stepper-btn:hover{background:var(--bg);}
+.stepper-btn:hover,.nudge-btn:hover{background:var(--bg);}
 .stepper-value{font-family:"IBM Plex Mono",monospace;min-width:0;flex:1;text-align:center;font-weight:700;font-size:.88rem;}
 
 .weight-actions{display:flex;gap:6px;min-width:0;}
@@ -458,3 +555,101 @@ svg[data-wheel-view="side"] #wheelFrontFlip{
 .modal-ok{width:100%;}
 @keyframes modalFadeIn{from{opacity:0}to{opacity:1}}
 @keyframes modalPopIn{from{opacity:0;transform:scale(.86) translateY(12px)}to{opacity:1;transform:scale(1) translateY(0)}}
+
+/* ================================================================
+   CELULAR — telas até 640px (cobre praticamente todo smartphone em
+   retrato, incluindo os "grandes" como iPhone Pro Max/Galaxy Ultra;
+   tablets em retrato, 640-1080px, continuam com o layout "de tela
+   média" de cima). Prioridades aqui: nada de coluna apertada demais
+   (chumbo interno/externo empilha em vez de espremer lado a lado),
+   texto grande o bastante pra ler sem apertar os olhos, e botões/
+   campos grandes o bastante pra tocar com o dedo sem errar — 44px é
+   o mínimo recomendado (Apple/Google) pra alvo de toque. Campos de
+   formulário (input/select) vão a 16px: abaixo disso o Safari do
+   iPhone dá zoom automático ao focar o campo, o que atrapalha mais
+   do que ajuda.
+   ================================================================ */
+@media (max-width:640px){
+  body{padding:14px 12px 28px;}
+  .app{gap:12px;}
+
+  /* topo: marca em cima, controles empilhados embaixo, cada um
+     ocupando a largura toda — nada de itens espremidos numa linha só */
+  .topbar{flex-direction:column;align-items:stretch;padding:14px 16px;gap:12px;}
+  .brand-mark{font-size:1.4rem;}
+  .brand-text strong{font-size:1.05rem;}
+  .brand-text small{font-size:.76rem;}
+  .topbar-controls{flex-direction:column;align-items:stretch;width:100%;gap:10px;}
+  .tolerance-row{flex-wrap:wrap;gap:8px;width:100%;font-size:.86rem;}
+  .tolerance-row label{flex:1 1 100%;}
+  .tolerance-row input{flex:1 1 auto;min-width:0;font-size:16px;padding:11px 12px;}
+  .tolerance-row span{flex:0 0 auto;}
+  .exercise-group{width:100%;flex-wrap:wrap;gap:8px;}
+  .exercise-group select{flex:1 1 140px;max-width:none;font-size:16px;padding:11px 10px;}
+  .exercise-group .btn{flex:1 1 140px;}
+
+  /* botões e campos: alvo de toque confortável em qualquer lugar do site */
+  .btn{min-height:44px;padding:10px 18px;font-size:.95rem;}
+  .btn-small{min-height:40px;padding:8px 14px;}
+  .btn-giant{padding:20px;font-size:1.25rem;min-height:58px;}
+
+  .panel{padding:15px;gap:11px;}
+  .panel-title{font-size:.88rem;}
+  .hint,.callout-tip{font-size:.86rem;line-height:1.5;padding:10px 12px;}
+  .zone-legend{font-size:.82rem;gap:8px 16px;}
+
+  /* colunas de chumbo interno/externo: empilha em vez de espremer —
+     é o pedido principal desse ajuste */
+  .weight-panels{grid-template-columns:minmax(0,1fr);gap:14px;}
+  .weight-panel{padding:14px;gap:11px;}
+  .weight-panel h3{font-size:.86rem;}
+
+  .stepper{gap:10px;}
+  .stepper-btn,.nudge-btn{width:46px;height:46px;font-size:1.35rem;}
+  .stepper-value{font-size:1rem;}
+
+  /* controle de girar: um pouco mais largo/com bolinha maior no celular,
+     mesmo raciocínio do resto (alvo de toque confortável) */
+  .rotate-control{width:38px;gap:8px;}
+  .rotate-control-label{font-size:.6rem;}
+  .rotate-thumb{width:30px;height:30px;}
+
+  .weight-actions{gap:8px;}
+  .btn-weight,.btn-move{min-height:44px;padding:10px 6px;font-size:.86rem;}
+
+  .weight-list{gap:8px;min-height:32px;}
+  .weight-list li{font-size:.86rem;padding:7px 8px 7px 13px;gap:8px;}
+  .weight-list li button{font-size:1.15rem;padding:4px 6px;}
+
+  .easy-mode-row{padding:12px 13px;font-size:.86rem;gap:10px;}
+  .easy-mode-row input{width:21px;height:21px;}
+  .easy-mode-row small{font-size:.8rem;}
+
+  .feedback{font-size:.92rem;padding:12px 14px;}
+
+  .view-toggle-row{flex-direction:column;align-items:flex-start;gap:8px;}
+  .view-toggle-row .btn{width:100%;}
+  .view-status{font-size:.84rem;}
+
+  .measure-alt{gap:12px;}
+  .measure-alt .numfield{min-width:140px;font-size:.84rem;}
+  .numfield input,.numfield select{font-size:16px;padding:10px 10px;}
+  .diameter-readout{font-size:1rem;}
+
+  /* guia didático: relógio centralizado em cima, texto embaixo — lado
+     a lado ficava pequeno demais numa tela estreita */
+  .guide-panel{padding:14px;}
+  .guide-title{font-size:.88rem;}
+  .guide-body{flex-direction:column;align-items:center;text-align:center;}
+  .guide-clock{width:180px;flex:0 0 auto;}
+  .guide-text{width:100%;text-align:left;}
+  .guide-line{font-size:.9rem;padding:8px 10px;}
+  .guide-legend{font-size:.82rem;}
+
+  .footer-note{font-size:.8rem;}
+
+  .modal-card{padding:26px 20px 20px;}
+  .modal-icon{font-size:2.6rem;}
+  .modal-title{font-size:1.3rem;}
+  .modal-message{font-size:.92rem;}
+}

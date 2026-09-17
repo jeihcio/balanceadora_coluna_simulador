@@ -12,7 +12,11 @@
   var A_MIN = 50, A_MAX = 300;
   var B_MIN = 50, B_MAX = 300;
   var CONTACT_TOL = 9;      // mm/px (escala 1:1) para considerar "encostou"
-  var PLANE_LABEL_TIGHT_GAP = 90; // abaixo disso (px), os rótulos INTERNO/EXTERNO abrem para fora p/ não colidir
+  var ANGLE_SNAP_TOL = 5;   // graus: arrastar um chumbo perto de outro do mesmo plano gruda nele
+  var PLANE_LABEL_TIGHT_GAP = 140; // abaixo disso (px), os rótulos INTERNO/EXTERNO abrem para fora p/ não colidir
+                                    // (era 90; aumentado porque em telas de celular esse rótulo agora
+                                    // renderiza maior — ver --svg-scale em updateSvgTextScale — e precisa
+                                    // de mais folga pra não colidir mesmo no modo "aberto")
   var FLANGE_X = 190;       // referência fixa da máquina (início da medida A)
   var WHEEL_CY = 335;       // altura comum: régua A, perfil lateral e centro da roda de frente
   var RULER_B_Y = 455;      // altura da régua B (embaixo da roda)
@@ -38,7 +42,7 @@
   var state = {
     mode: 'learn',
     wheelView: 'side',
-    tolerance: 15, // tolerância padrão = soma dos dois planos
+    tolerance: 0, // tolerância padrão = soma dos dois planos
 
     handleA_x: FLANGE_X + 20,
     handleBIn_x: FLANGE_X + 10,
@@ -51,12 +55,22 @@
     spinning: false,
     hasSpun: false,
 
+    // Modo fácil: os chumbos de cada plano formam um BLOCO só. O próximo
+    // chumbo nasce colado exatamente em cima do último chumbo desse plano
+    // (mesmo ângulo, pronto, sem precisar arrastar) e mover/arrastar
+    // qualquer chumbo do plano (Mover ◄/► ou arraste) desloca TODOS juntos,
+    // preservando a posição relativa entre eles. Desligado, o próximo
+    // chumbo nasce do LADO do último (metade do seu próprio corpo
+    // sobreposta nele) e cada chumbo é independente: adicionar, mover ou
+    // arrastar um nunca afeta os outros.
+    easyMode: true,
+
     unbalance: { internal: { mass: 45, angle: 40 }, external: { mass: 35, angle: 200 } },
-    // cada plano tem só um "conjunto" de chumbos: todos colados um no
-    // outro, no mesmo ângulo (peças reais coladas na roda não flutuam
-    // separadas) — angle é a posição do conjunto, pieces é a lista das
-    // gramaturas individuais que o compõem.
-    weights: { internal: { angle: 0, pieces: [] }, external: { angle: 0, pieces: [] } },
+    // cada plano guarda uma LISTA de chumbos, cada um com sua PRÓPRIA massa
+    // e ângulo (podem estar colados no mesmo ponto ou espalhados pela
+    // roda) — o desbalanceamento restante é a soma vetorial de todos eles,
+    // subtraída do alvo (ver computeRemaining, abaixo).
+    weights: { internal: { pieces: [] }, external: { pieces: [] } },
     pendingMass: { internal: 5, external: 5 },
     selectedWeight: null,
     lastReading: { internal: null, external: null }
@@ -95,19 +109,19 @@
     return Math.round(value / step) * step;
   }
 
-  // massa total dos chumbos de um plano (todos ficam colados um no outro,
-  // no mesmo ângulo — a máquina trata o conjunto como uma peça só)
-  function planeTotalMass(plane) {
-    return state.weights[plane].pieces.reduce(function (a, b) { return a + b; }, 0);
-  }
-
-  // desbalanceamento restante de um plano = alvo - chumbos colocados
-  // a leitura da máquina é sempre múltiplo de 5 g (só existe chumbo nesses
-  // valores, então não faz sentido exibir uma leitura "quebrada")
+  // desbalanceamento restante de um plano = alvo - soma vetorial de TODOS
+  // os chumbos desse plano (cada um no seu próprio ângulo — se dois
+  // estiverem colados no mesmo ponto, a soma dá exatamente o mesmo
+  // resultado que um chumbo só com a massa somada; se estiverem
+  // espalhados, cada um puxa o resultado no seu próprio sentido, como
+  // numa roda de verdade). A leitura da máquina é sempre múltiplo de 5 g
+  // (só existe chumbo nesses valores, então não faz sentido exibir uma
+  // leitura "quebrada").
   function computeRemaining(plane) {
     var target = toVector(state.unbalance[plane].mass, state.unbalance[plane].angle);
-    var wp = state.weights[plane];
-    var placed = toVector(planeTotalMass(plane), wp.angle);
+    var placed = state.weights[plane].pieces.reduce(function (acc, piece) {
+      return addVec(acc, toVector(piece.mass, piece.angle));
+    }, { x: 0, y: 0 });
     var result = fromVector(subVec(target, placed));
     result.mass = roundToStep(result.mass, MASS_STEP);
     return result;
@@ -200,13 +214,13 @@
   function cacheRefs() {
     [
       'app', 'toast',
-      'selectPreset', 'btnExercicio',
-      'btnViewToggle', 'viewStatus',
+      'selectPreset', 'btnExercicio', 'chkEasyMode',
+      'btnViewToggle', 'viewStatus', 'rotateControl', 'rotateTrack', 'rotateThumb', 'machineFigure', 'wheelSideFlip',
       'machineSvg', 'sideRim', 'sideRimTread',
       'planeInternalLine', 'planeExternalLine', 'planeInternalLabel', 'planeExternalLabel',
       'rulerALine', 'rulerATicks', 'handleA', 'labelA',
       'rulerBTicks', 'calipersLine', 'handleBIn', 'handleBOut', 'labelB',
-      'inputA', 'inputB', 'selectD', 'labelD',
+      'inputA', 'inputBIn', 'inputB', 'selectD', 'labelD',
       'angleTicks', 'wheelRotor', 'tireCircle', 'rimCircle', 'spokes',
       'outerPlaneRing', 'innerPlaneRing', 'valveStem', 'targetGhosts',
       'weightsInternal', 'weightsExternal', 'refPointer',
@@ -263,7 +277,12 @@
       line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y);
       line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);
       wrap.appendChild(line);
-      if (major) {
+      // o próprio ponteiro REF já rotula o 90° ("REF 90° (12h)") bem em
+      // cima do aro; desenhar o rótulo do tick aqui também é redundante e,
+      // desde que os textos passaram a compensar o tamanho em telas
+      // pequenas (--svg-scale), os dois ficavam colados um no outro. A
+      // marcação (linha do tick) continua normal, só o texto some aqui.
+      if (major && a !== 90) {
         var lp = polarXY(FRONT_CX, FRONT_CY, rLabel, a);
         var anchor = 'middle';
         // a etiqueta de 0° (9h) fica bem entre a coluna e a roda: com a hora
@@ -332,19 +351,21 @@
     renderGuidePlane('external', el.guideMarkerExternal, el.guideTextExternal);
   }
 
-  // veredito do conjunto de chumbos de um plano (todos colados, mesmo
-  // ângulo): leve, pesado, fora do lugar (mover) ou já balanceado —
-  // compara o alvo real restante (computeRemaining) com o ângulo do
-  // conjunto. Usado tanto no painel "Diagrama de campo" quanto na cor da
-  // etiqueta "X g @ Y°" na lista de chumbos (em vez de pintar a própria
-  // roda, que só causava confusão).
+  // veredito do ÚLTIMO chumbo colocado num plano (pode haver outros
+  // espalhados por aí, mas é nele que o usuário está trabalhando agora):
+  // leve, pesado, fora do lugar (mover) ou já balanceado — compara o alvo
+  // real restante (computeRemaining, já somando TODOS os chumbos do
+  // plano) com o ângulo desse último chumbo. Usado tanto no painel
+  // "Diagrama de campo" quanto na cor da etiqueta "X g @ Y°" na lista de
+  // chumbos (em vez de pintar a própria roda, que só causava confusão).
   function computeVerdict(plane) {
     var wp = state.weights[plane];
     if (!state.hasSpun || !wp.pieces.length) return null;
     var rem = computeRemaining(plane);
     if (rem.mass === 0) return { key: 'balanced', rem: rem };
-    var diff = angularDist(rem.angle, wp.angle);
-    var signed = angularSignedDiff(rem.angle, wp.angle);
+    var lastAngle = wp.pieces[wp.pieces.length - 1].angle;
+    var diff = angularDist(rem.angle, lastAngle);
+    var signed = angularSignedDiff(rem.angle, lastAngle);
     if (diff <= 30) return { key: 'leve', rem: rem };
     if (diff >= 150) return { key: 'pesado', rem: rem };
     return { key: 'mover', dir: signed > 0 ? 1 : -1, rem: rem };
@@ -365,7 +386,7 @@
       return;
     }
 
-    var clusterPoint = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R, wp.angle);
+    var clusterPoint = polarXY(GUIDE_CX, GUIDE_CY, GUIDE_R, wp.pieces[wp.pieces.length - 1].angle);
     var dotsHtml = '<circle cx="' + clusterPoint.x + '" cy="' + clusterPoint.y + '" r="6" class="guide-marker-dot"></circle>';
 
     var verdict = computeVerdict(plane);
@@ -527,6 +548,7 @@
     el.calipersLine.classList.toggle('contact', contactBIn && contactBOut);
 
     if (document.activeElement !== el.inputA) el.inputA.value = Math.round(aVal);
+    if (document.activeElement !== el.inputBIn) el.inputBIn.value = Math.round(state.handleBIn_x - FLANGE_X);
     if (document.activeElement !== el.inputB) el.inputB.value = Math.round(bVal);
   }
 
@@ -540,10 +562,44 @@
     if (view === 'front') {
       el.btnViewToggle.textContent = 'Ver roda de lado';
       el.viewStatus.textContent = 'Vista frontal (posicionando chumbos ao redor do aro)';
+      el.rotateControl.classList.add('is-visible');
+      syncRotateSlider();
     } else {
       el.btnViewToggle.textContent = 'Ver roda de frente';
       el.viewStatus.textContent = 'Vista lateral (mesma posição de montagem de uma máquina real)';
+      el.rotateControl.classList.remove('is-visible');
     }
+    // mostrar/esconder o controle de girar muda quanto espaço sobra pro
+    // desenho na linha (.figure-row) — precisa remedir largura (--svg-scale)
+    // e repassar a altura pro controle de girar (ver updateSvgTextScale).
+    updateSvgTextScale();
+  }
+
+  var draggingRotateTrack = false;
+
+  // controle de girar: mostra/recebe a posição ATUAL da roda (mod 360, na
+  // faixa -180..180). Não importa quantas voltas o valor "cru"
+  // (state.rotorAngleRaw) acumulou arrastando o pneu ou no GIRAR
+  // automático: só o resto da divisão por 360 tem efeito visual, e é isso
+  // que a bolinha mostra e ajusta.
+  function rawAngleToSliderValue(raw) {
+    var m = ((raw % 360) + 360) % 360;
+    if (m > 180) m -= 360;
+    return m;
+  }
+
+  // posiciona a bolinha no trilho pro valor dado (-180 no topo, 180 embaixo
+  // — igual "topo é positivo" do desenho de referência). É só matemática de
+  // posição (top em %), sem depender de nenhum comportamento de navegador.
+  function setRotateThumbPosition(v) {
+    var pct = (180 - v) / 360 * 100;
+    el.rotateThumb.style.top = pct + '%';
+    el.rotateTrack.setAttribute('aria-valuenow', String(Math.round(v)));
+  }
+
+  function syncRotateSlider() {
+    if (!el.rotateTrack || draggingRotateTrack) return;
+    setRotateThumbPosition(rawAngleToSliderValue(state.rotorAngleRaw));
   }
 
   /* ================================================================
@@ -554,12 +610,17 @@
   }
 
   function renderWeights() {
-    renderWeightGroup('internal', el.weightsInternal, state.geom.innerR);
-    renderWeightGroup('external', el.weightsExternal, state.geom.outerR);
+    renderWeightGroup('internal', el.weightsInternal);
+    renderWeightGroup('external', el.weightsExternal);
     renderWeightLists();
     renderTargetGhosts();
     renderGuide();
   }
+
+  // elemento <g> de cada chumbo, por plano e índice — guardado à parte pra
+  // poder reposicionar (arraste) SEM recriar o DOM, o que perderia o
+  // pointer capture no meio do gesto.
+  var pieceEls = { internal: [], external: [] };
 
   // raio visual de cada chumbo, correlacionado com a gramatura (chumbos
   // maiores em massa nascem visivelmente maiores, ainda que a diferença
@@ -607,44 +668,100 @@
     }
   }
 
-  // os chumbos de um plano são um conjunto ÚNICO (mesmo ângulo pra todos —
-  // a máquina não sabe separar chumbos colados lado a lado): desenhados
-  // encostados um no outro, e arrastar/mover qualquer peça arrasta/move o
-  // conjunto inteiro junto.
-  function renderWeightGroup(plane, container, radius) {
+  // agrupa os chumbos de um plano por ângulo IDÊNTICO: chumbos que caíram
+  // exatamente no mesmo ponto (recém-nascidos em cima do último, ou
+  // arrastados até encostar um no outro) formam uma fileira encostada;
+  // chumbos em ângulos diferentes ficam em grupos separados, cada um no
+  // seu próprio lugar do aro. Cada chumbo continua sendo independente:
+  // arrastar um nunca move os outros, mesmo que estejam no mesmo grupo.
+  function groupPiecesByAngle(pieces) {
+    var groups = [];
+    pieces.forEach(function (piece, idx) {
+      var group = null;
+      for (var i = 0; i < groups.length; i++) {
+        if (groups[i].angle === piece.angle) { group = groups[i]; break; }
+      }
+      if (!group) {
+        group = { angle: piece.angle, indices: [] };
+        groups.push(group);
+      }
+      group.indices.push(idx);
+    });
+    return groups;
+  }
+
+  // reposiciona (SEM recriar) os elementos já desenhados de um plano,
+  // agrupando por ângulo — chamado tanto no render normal quanto a cada
+  // quadro de arraste, pra nunca perder a referência do elemento (e o
+  // pointer capture) no meio do gesto.
+  function layoutPlanePieces(plane) {
+    var wp = state.weights[plane];
+    var radius = plane === 'internal' ? state.geom.innerR : state.geom.outerR;
+    groupPiecesByAngle(wp.pieces).forEach(function (group) {
+      var masses = group.indices.map(function (i) { return wp.pieces[i].mass; });
+      var offsets = layoutPieceOffsets(masses);
+      var groupEls = group.indices.map(function (i) { return pieceEls[plane][i]; });
+      positionClusterEls(groupEls, offsets, radius, group.angle);
+    });
+  }
+
+  function renderWeightGroup(plane, container) {
     container.innerHTML = '';
     var wp = state.weights[plane];
     var pieces = wp.pieces;
+    pieceEls[plane] = [];
     if (!pieces.length) return;
 
-    var offsets = layoutPieceOffsets(pieces);
-    var groupEls = [];
-    for (var idx = 0; idx < pieces.length; idx++) {
-      var mass = pieces[idx];
-      var r = pieceRadius(mass);
+    var groupSizeOfIdx = [];
+    groupPiecesByAngle(pieces).forEach(function (group) {
+      group.indices.forEach(function (i) { groupSizeOfIdx[i] = group.indices.length; });
+    });
+
+    pieces.forEach(function (piece, idx) {
+      var r = pieceRadius(piece.mass);
       var g = document.createElementNS(SVG_NS, 'g');
       g.setAttribute('class', 'weight-marker ' + plane + (isSelected(plane, idx) ? ' selected' : ''));
       g.setAttribute('tabindex', '0');
       g.setAttribute('role', 'button');
       g.setAttribute('aria-label',
-        'Chumbo de ' + mass + ' gramas, parte de um conjunto de ' + pieces.length +
-        ' no plano ' + planeLabel(plane) + ', a ' + Math.round(wp.angle) + ' graus (' + hourLabel(wp.angle) + ')');
+        'Chumbo de ' + piece.mass + ' gramas, no plano ' + planeLabel(plane) +
+        ', a ' + Math.round(piece.angle) + ' graus (' + hourLabel(piece.angle) + ')' +
+        (groupSizeOfIdx[idx] > 1 ? ', colado com outro chumbo nesse mesmo ponto' : ''));
       var circle = document.createElementNS(SVG_NS, 'circle');
       circle.setAttribute('r', String(r));
       var text = document.createElementNS(SVG_NS, 'text');
       text.setAttribute('y', '1');
       text.setAttribute('font-size', Math.max(7, r * 0.65).toFixed(1));
-      text.textContent = String(mass);
+      text.textContent = String(piece.mass);
       g.appendChild(circle);
       g.appendChild(text);
       container.appendChild(g);
-      groupEls.push(g);
-    }
-    positionClusterEls(groupEls, offsets, radius, wp.angle);
-    attachClusterDrag(plane, radius, groupEls, offsets);
+      pieceEls[plane][idx] = g;
+      attachPieceDrag(plane, idx, g);
+    });
+
+    layoutPlanePieces(plane);
   }
 
-  function attachClusterDrag(plane, radius, groupEls, offsets) {
+  // arrasta se aproximando de outro chumbo do mesmo plano gruda nele
+  // (mesmo ângulo exato) — só assim dá pra empilhar dois chumbos no mesmo
+  // ponto pelo mouse/toque com precisão.
+  function snapAngleToNeighbors(plane, idx, angle) {
+    var pieces = state.weights[plane].pieces;
+    for (var i = 0; i < pieces.length; i++) {
+      if (i === idx) continue;
+      if (angularDist(angle, pieces[i].angle) <= ANGLE_SNAP_TOL) return pieces[i].angle;
+    }
+    return angle;
+  }
+
+  // Fora do modo fácil, cada chumbo é arrastado INDIVIDUALMENTE: pegar um
+  // nunca move os outros, mesmo que estejam colados no mesmo ponto — pra
+  // permitir tanto empilhar um em cima do outro quanto separar e afastar.
+  // Em modo fácil os chumbos de um plano formam um BLOCO só: arrastar
+  // qualquer um deles desloca todos juntos (mesmo delta de ângulo),
+  // preservando a posição relativa entre eles.
+  function attachPieceDrag(plane, idx, g) {
     var dragging = false;
     function onMove(e) {
       if (!dragging) return;
@@ -652,8 +769,17 @@
       var screenAngle = angleFromPoint(state.geom.cx, state.geom.cy, pt.x, pt.y);
       var rotorMod = ((state.rotorAngleRaw % 360) + 360) % 360;
       var wheelAngle = ((screenAngle - rotorMod) % 360 + 360) % 360;
-      state.weights[plane].angle = wheelAngle;
-      positionClusterEls(groupEls, offsets, radius, wheelAngle);
+      var wp = state.weights[plane];
+      if (state.easyMode) {
+        var delta = angularSignedDiff(wheelAngle, wp.pieces[idx].angle);
+        wp.pieces.forEach(function (piece) {
+          piece.angle = ((piece.angle + delta) % 360 + 360) % 360;
+        });
+      } else {
+        wheelAngle = snapAngleToNeighbors(plane, idx, wheelAngle);
+        wp.pieces[idx].angle = wheelAngle;
+      }
+      layoutPlanePieces(plane);
       renderWeightLists();
       renderTargetGhosts();
       renderGuide();
@@ -661,29 +787,27 @@
     function onEnd(e) {
       if (!dragging) return;
       dragging = false;
-      groupEls.forEach(function (g) { try { g.releasePointerCapture(e.pointerId); } catch (_) {} });
+      try { g.releasePointerCapture(e.pointerId); } catch (_) {}
     }
-    groupEls.forEach(function (g, idx) {
-      g.addEventListener('pointerdown', function (e) {
-        dragging = true;
-        setWheelView('front');
-        state.selectedWeight = { plane: plane, index: idx };
-        try { g.setPointerCapture(e.pointerId); } catch (_) {}
-        renderWeightLists();
-        markSelectionClasses();
-        e.preventDefault();
-        e.stopPropagation();
-      });
-      g.addEventListener('pointermove', onMove);
-      g.addEventListener('pointerup', onEnd);
-      g.addEventListener('pointercancel', onEnd);
-      g.addEventListener('keydown', function (e) {
-        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-        e.preventDefault();
-        var dir = e.key === 'ArrowRight' ? 1 : -1;
-        state.selectedWeight = { plane: plane, index: idx };
-        moveWeight(plane, dir);
-      });
+    g.addEventListener('pointerdown', function (e) {
+      dragging = true;
+      setWheelView('front');
+      state.selectedWeight = { plane: plane, index: idx };
+      try { g.setPointerCapture(e.pointerId); } catch (_) {}
+      renderWeightLists();
+      markSelectionClasses();
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    g.addEventListener('pointermove', onMove);
+    g.addEventListener('pointerup', onEnd);
+    g.addEventListener('pointercancel', onEnd);
+    g.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      var dir = e.key === 'ArrowRight' ? 1 : -1;
+      state.selectedWeight = { plane: plane, index: idx };
+      moveWeight(plane, dir);
     });
   }
 
@@ -840,14 +964,14 @@
     var verdict = computeVerdict(plane);
     var wp = state.weights[plane];
     var lastIdx = wp.pieces.length - 1;
-    wp.pieces.forEach(function (mass, idx) {
+    wp.pieces.forEach(function (piece, idx) {
       var li = document.createElement('li');
       if (isSelected(plane, idx)) li.classList.add('selected');
       if (idx === lastIdx && verdict && verdict.key !== 'balanced') {
         li.classList.add('verdict-' + verdict.key);
       }
       var span = document.createElement('span');
-      span.textContent = mass + ' g @ ' + Math.round(wp.angle) + '°';
+      span.textContent = piece.mass + ' g @ ' + Math.round(piece.angle) + '°';
       li.appendChild(span);
       var btn = document.createElement('button');
       btn.type = 'button';
@@ -871,17 +995,39 @@
     setWheelView('front');
     var mass = state.pendingMass[plane];
     var wp = state.weights[plane];
-    var isNewCluster = wp.pieces.length === 0;
-    if (isNewCluster) wp.angle = currentTopWheelAngle();
-    wp.pieces.push(mass);
+    var isFirst = wp.pieces.length === 0;
+    // o chumbo novo nasce perto do ÚLTIMO chumbo desse plano (ou na
+    // referência/topo, se for o primeiro) — os já colocados NUNCA se
+    // mexem ao adicionar. Em modo fácil nasce colado exatamente em cima
+    // do último (mesmo ângulo, formando um bloco só). Fora do modo
+    // fácil, nasce do LADO do último, com metade do próprio corpo
+    // sobreposta nele (a outra metade pra fora) — o usuário arrasta esse
+    // chumbo novo individualmente pra onde quiser, sem afetar os outros.
+    var angle;
+    if (isFirst) {
+      angle = currentTopWheelAngle();
+    } else {
+      var lastAngle = wp.pieces[wp.pieces.length - 1].angle;
+      if (state.easyMode) {
+        angle = lastAngle;
+      } else {
+        var halfStepDeg = moveStepDegFor(plane, mass) / 2;
+        angle = ((lastAngle + halfStepDeg) % 360 + 360) % 360;
+      }
+    }
+    wp.pieces.push({ mass: mass, angle: angle });
     state.selectedWeight = { plane: plane, index: wp.pieces.length - 1 };
     renderWeights();
+    var placementMsg;
+    if (isFirst) {
+      placementMsg = 'na marca de referência (topo)';
+    } else if (state.easyMode) {
+      placementMsg = 'colado bem em cima do último chumbo desse plano — pronto, não precisa arrastar';
+    } else {
+      placementMsg = 'nasceu do lado do último chumbo desse plano, com metade sobreposta nele, sem mexer nos outros — arraste-o pra onde quiser';
+    }
     setFeedback(
-      'Chumbo de ' + mass + ' g adicionado no plano ' + planeLabel(plane) +
-      (isNewCluster
-        ? ', na marca de referência (topo)'
-        : ', colado junto com os outros chumbos desse plano — a máquina trata o conjunto como uma peça só') +
-      '. Gire a roda para medir de novo.',
+      'Chumbo de ' + mass + ' g adicionado no plano ' + planeLabel(plane) + ', ' + placementMsg + '. Gire a roda para medir de novo.',
       'neutral'
     );
   }
@@ -905,15 +1051,16 @@
   }
 
   // o incremento do botão Mover não é um valor fixo: é a largura física
-  // (traduzida em graus, no raio desse plano) do próprio conjunto de
-  // chumbos colados — mover "a distância de uma peça da gramatura que o
-  // sistema indicou" (ex.: 50 g = dois chumbos de 25, ou dois de 20 e um
-  // de 10 — a largura desses chumbos juntos).
-  function moveStepDegFor(plane) {
-    var wp = state.weights[plane];
+  // (traduzida em graus, no raio desse plano) do PRÓPRIO chumbo que está
+  // sendo movido — cada chumbo pode estar num lugar diferente agora.
+  // Fora do modo fácil, Mover avança só a peça selecionada (ou a última
+  // adicionada, se nenhuma estiver selecionada), nunca as outras. Em modo
+  // fácil, os chumbos do plano formam um bloco só: Mover desloca TODOS
+  // juntos, pelo mesmo tanto (o passo usa a largura da peça de
+  // referência, mas o giro é aplicado a cada chumbo do plano).
+  function moveStepDegFor(plane, mass) {
     var radius = plane === 'internal' ? state.geom.innerR : state.geom.outerR;
-    var widthPx = wp.pieces.reduce(function (sum, m) { return sum + 2 * pieceRadius(m); }, 0);
-    if (!widthPx) widthPx = 2 * pieceRadius(WEIGHT_VALUES[0]);
+    var widthPx = 2 * pieceRadius(mass);
     return (widthPx / (2 * Math.PI * radius)) * 360;
   }
 
@@ -924,8 +1071,20 @@
       setFeedback('Não há chumbo no plano ' + planeLabel(plane) + ' para mover. Adicione um chumbo primeiro.', 'neutral');
       return;
     }
-    var stepDeg = moveStepDegFor(plane);
-    wp.angle = ((wp.angle + dir * stepDeg) % 360 + 360) % 360;
+    var hasSelected = state.selectedWeight && state.selectedWeight.plane === plane &&
+      wp.pieces[state.selectedWeight.index];
+    var idx = hasSelected ? state.selectedWeight.index : wp.pieces.length - 1;
+    var piece = wp.pieces[idx];
+    var stepDeg = moveStepDegFor(plane, piece.mass);
+    var deltaAngle = dir * stepDeg;
+    if (state.easyMode) {
+      wp.pieces.forEach(function (p) {
+        p.angle = ((p.angle + deltaAngle) % 360 + 360) % 360;
+      });
+    } else {
+      piece.angle = ((piece.angle + deltaAngle) % 360 + 360) % 360;
+    }
+    state.selectedWeight = { plane: plane, index: idx };
     renderWeights();
   }
 
@@ -1041,6 +1200,7 @@
       lastAngle = angleNow;
       el.wheelRotor.setAttribute('transform', 'rotate(' + state.rotorAngleRaw + ' ' + state.geom.cx + ' ' + state.geom.cy + ')');
       updateLeds();
+      syncRotateSlider();
     });
     function end(e) {
       if (!dragging) return;
@@ -1061,6 +1221,7 @@
     setWheelView('front');
     state.spinning = true;
     el.btnGirar.disabled = true;
+    el.rotateTrack.classList.add('disabled');
     setStatusLed(true);
 
     var prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1074,6 +1235,8 @@
       state.rotorAngleRaw = toDeg;
       state.spinning = false;
       el.btnGirar.disabled = false;
+      el.rotateTrack.classList.remove('disabled');
+      syncRotateSlider();
       setStatusLed(false);
       afterSpinMeasure();
     }
@@ -1137,18 +1300,58 @@
     var availH = rect.height;
     if (availW <= 0 || availH <= 0) return;
 
-    var massSize = clamp(availH / 2.4, 9, 34);
-    applyReadoutSize(massSize);
+    // 1) tamanho "ideal" pela altura disponível (entre 9 e 34px).
+    var idealSize = clamp(availH / 2.4, 9, 34);
+    applyReadoutSize(idealSize);
 
+    // 2) mas isso nunca pode estourar a largura da coluna: mede o texto
+    // mais largo ("75 g" etc.) nesse tamanho ideal e, se não couber,
+    // encolhe até caber. Sem re-impor o piso de 9px depois disso — se
+    // fizesse isso, em telas bem estreitas o texto voltava a crescer além
+    // da coluna e o "g" do interno grudava no número do externo. Evitar a
+    // sobreposição vem antes do piso de legibilidade.
     var w1 = el.dispMassInt.getBoundingClientRect().width;
     var w2 = el.dispMassExt.getBoundingClientRect().width;
     var widestText = Math.max(w1, w2);
     var safeW = availW * 0.94;
+    var massSize = idealSize;
     if (widestText > safeW && widestText > 0) {
-      massSize = massSize * (safeW / widestText);
+      massSize = clamp(idealSize * (safeW / widestText), 5, 34);
     }
-    massSize = clamp(massSize, 9, 34);
     applyReadoutSize(massSize);
+  }
+
+  // Os textos desenhados DENTRO do <svg> da máquina (réguas, ângulos,
+  // "A = 20 mm" etc.) usam unidades do viewBox (960 de largura), que
+  // encolhem junto com o desenho inteiro. Numa tela de celular, onde o
+  // <svg> pode renderizar bem menor que 960px reais, isso deixava esse
+  // texto minúsculo e ilegível. --svg-scale (largura real do <svg> em
+  // tela ÷ largura do viewBox) é usado pelo CSS (ver .label, .tick-text
+  // etc.) pra corrigir o tamanho em unidades do viewBox na proporção
+  // inversa, mantendo o texto sempre com um tamanho real razoável na
+  // tela. Chamado sempre que o <svg> pode ter mudado de tamanho (no
+  // carregamento e no resize da janela — geometria da roda em si, como
+  // o diâmetro, não muda o tamanho em tela do <svg>, só o que tem
+  // dentro dele, então não precisa recalcular nesses casos).
+  function updateSvgTextScale() {
+    var rect = el.machineSvg.getBoundingClientRect();
+    if (!rect.width) return;
+    var vbWidth = (el.machineSvg.viewBox && el.machineSvg.viewBox.baseVal && el.machineSvg.viewBox.baseVal.width) || 960;
+    el.machineSvg.style.setProperty('--svg-scale', rect.width / vbWidth);
+    syncRotateControlHeight();
+  }
+
+  // o controle de girar (range vertical) fica do lado do desenho e precisa
+  // da MESMA altura dele pra não esticar (ou encolher) sozinho. A altura do
+  // .machine-figure não dá pra escrever em CSS puro aqui: ela nasce da
+  // largura que sobra na linha (depois de tirar a faixinha desse controle)
+  // multiplicada pela proporção do viewBox (620/960) — então é medida em JS,
+  // igual o --svg-scale acima, e reaplicada sempre que o desenho pode ter
+  // mudado de tamanho.
+  function syncRotateControlHeight() {
+    if (!el.rotateControl) return;
+    var figRect = el.machineFigure.getBoundingClientRect();
+    if (figRect.height) el.rotateControl.style.height = figRect.height + 'px';
   }
 
   function updateFeedback(prevInt, curInt, prevExt, curExt) {
@@ -1252,18 +1455,24 @@
     hideBalancedModal();
     setWheelView('side');
     state.unbalance = generateUnbalance();
-    state.weights = { internal: { angle: 0, pieces: [] }, external: { angle: 0, pieces: [] } };
+    state.weights = { internal: { pieces: [] }, external: { pieces: [] } };
     state.selectedWeight = null;
     state.lastReading = { internal: null, external: null };
     state.hasSpun = false;
     state.rotorAngleRaw = 0;
     el.wheelRotor.setAttribute('transform', 'rotate(0 ' + state.geom.cx + ' ' + state.geom.cy + ')');
+    syncRotateSlider();
 
     state.rim.internalX = FLANGE_X + randInt(70, 220);
     state.rim.externalX = state.rim.internalX + randInt(50, 180);
-    state.handleA_x = FLANGE_X + 20;
+    // A régua começa DENTRO da faixa válida (A_MIN/B_MIN = 50mm) — começar
+    // abaixo disso (era 20mm/30mm) fazia o primeiro toque nos botões −/+ ou
+    // no campo numérico "pular" pro mínimo em vez de andar 1mm de cada vez,
+    // porque tanto o campo quanto os botões já respeitavam esse mínimo, só
+    // o valor inicial do exercício não.
+    state.handleA_x = FLANGE_X + A_MIN;
     state.handleBIn_x = FLANGE_X + 10;
-    state.handleBOut_x = FLANGE_X + 40;
+    state.handleBOut_x = state.handleBIn_x + B_MIN + 30;
 
     state.rim.diameterIn = diameterIn;
     el.selectD.value = String(diameterIn);
@@ -1296,14 +1505,19 @@
     renderGuide();
   }
 
+  // devolve { start } pra permitir que OUTRO listener (o "desempate" da
+  // régua B logo abaixo) inicie o arraste desse handle mesmo quando o
+  // toque/clique bateu fisicamente num elemento diferente — ver por quê
+  // logo depois da régua B.
   function makeDraggable(handleEl, opts) {
     var dragging = false;
     handleEl.style.touchAction = 'none';
-    handleEl.addEventListener('pointerdown', function (e) {
+    function start(e) {
       dragging = true;
       try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
       e.preventDefault();
-    });
+    }
+    handleEl.addEventListener('pointerdown', start);
     handleEl.addEventListener('pointermove', function (e) {
       if (!dragging) return;
       var pt = svgPointFromEvent(el.machineSvg, e);
@@ -1327,10 +1541,15 @@
       opts.setX(clamp(cur, opts.min, opts.max));
       renderMeasureFigure();
     });
+    return { start: start };
   }
 
   function bindEvents() {
     el.btnExercicio.addEventListener('click', generateExercise);
+
+    el.chkEasyMode.addEventListener('change', function () {
+      state.easyMode = el.chkEasyMode.checked;
+    });
 
     el.btnViewToggle.addEventListener('click', function () {
       setWheelView(state.wheelView === 'side' ? 'front' : 'side');
@@ -1343,21 +1562,49 @@
       setX: function (x) { state.handleA_x = x; },
       min: FLANGE_X, max: FLANGE_X + A_MAX
     });
-    makeDraggable(el.handleBIn, {
+    var dragBIn = makeDraggable(el.handleBIn, {
       getX: function () { return state.handleBIn_x; },
       setX: function (x) { state.handleBIn_x = x; },
       min: FLANGE_X, max: FLANGE_X + B_MAX
     });
-    makeDraggable(el.handleBOut, {
+    var dragBOut = makeDraggable(el.handleBOut, {
       getX: function () { return state.handleBOut_x; },
       setX: function (x) { state.handleBOut_x = x; },
       min: FLANGE_X, max: FLANGE_X + B_MAX * 2
     });
 
+    // quando as duas pontas da régua B ficam perto uma da outra (medida B
+    // pequena), o SVG desenha handleBOut por cima de handleBIn — e o
+    // navegador entrega o toque pra quem está NO TOPO, não pra quem está
+    // mais perto fisicamente do dedo. Resultado: tentar pegar a ponta
+    // interna (esquerda) várias vezes "rouba" e move a externa (direita)
+    // em vez dela. Aqui a gente decide pela DISTÂNCIA real do toque a cada
+    // ponta (não pela ordem de desenho) antes de deixar o próprio handler
+    // de cada handle rodar — se o toque bateu na ponta errada, redireciona
+    // pra ponta certa. Fica na fase de captura (o "true" no final) do grupo
+    // que contém as duas, então roda ANTES do pointerdown de cada handle.
+    el.wheelSideFlip.addEventListener('pointerdown', function (e) {
+      var isB = e.target.closest && e.target.closest('.handle-b');
+      if (!isB) return;
+      var pt = svgPointFromEvent(el.machineSvg, e);
+      var nearestIsIn = Math.abs(pt.x - state.handleBIn_x) <= Math.abs(pt.x - state.handleBOut_x);
+      var hitIn = isB === el.handleBIn;
+      if (nearestIsIn !== hitIn) {
+        e.stopPropagation();
+        (nearestIsIn ? dragBIn : dragBOut).start(e);
+      }
+    }, true);
+
     el.inputA.addEventListener('input', function () {
       var v = parseFloat(el.inputA.value);
       if (isNaN(v)) return;
       state.handleA_x = FLANGE_X + clamp(v, A_MIN, A_MAX);
+      renderMeasureFigure();
+    });
+    el.inputBIn.addEventListener('input', function () {
+      var v = parseFloat(el.inputBIn.value);
+      if (isNaN(v)) return;
+      state.handleBIn_x = FLANGE_X + clamp(v, 0, B_MAX);
       renderMeasureFigure();
     });
     el.inputB.addEventListener('input', function () {
@@ -1376,7 +1623,7 @@
 
     el.inputTolerance.addEventListener('input', function () {
       var v = parseInt(el.inputTolerance.value, 10);
-      if (isNaN(v)) v = 15;
+      if (isNaN(v)) v = 0;
       state.tolerance = clamp(v, 0, 40);
       if (state.hasSpun) updateDisplay(state.lastReading.internal, state.lastReading.external);
     });
@@ -1387,7 +1634,7 @@
     // do valor que a máquina de fato aplicava no cálculo.
     el.inputTolerance.addEventListener('change', function () {
       var v = parseInt(el.inputTolerance.value, 10);
-      if (isNaN(v)) v = 15;
+      if (isNaN(v)) v = 0;
       var applied = clamp(roundToStep(v, 5), 0, 40);
       state.tolerance = applied;
       el.inputTolerance.value = String(applied);
@@ -1416,6 +1663,118 @@
         else if (action === 'move') moveWeight(plane, parseInt(btn.getAttribute('data-dir'), 10));
       });
     });
+
+    bindNudgeButtons();
+    bindRotateSlider();
+  }
+
+  /* ================================================================
+     RÉGUAS A/B: botões −/+ (alternativa ao arrasto, mesma ideia dos
+     "Mover ►/◄" do chumbo). Segurando o botão, repete sozinho — não
+     precisa ficar tocando várias vezes pra andar uma distância maior.
+     ================================================================ */
+  function nudgeRuler(target, dir) {
+    if (target === 'A') {
+      var newA = clamp((state.handleA_x - FLANGE_X) + dir, A_MIN, A_MAX);
+      state.handleA_x = FLANGE_X + newA;
+    } else if (target === 'BIn') {
+      // move só a ponta interna (a seta vermelha), igual arrastar ela
+      // direto no desenho — a ponta externa fica onde estava, então a
+      // largura B muda sozinha como consequência (mesmo comportamento do
+      // arraste, nunca teve piso de 50mm pra essa ponta isolada).
+      var newBIn = clamp((state.handleBIn_x - FLANGE_X) + dir, 0, B_MAX);
+      state.handleBIn_x = FLANGE_X + newBIn;
+    } else if (target === 'B') {
+      var curB = state.handleBOut_x - state.handleBIn_x;
+      var newB = clamp(curB + dir, B_MIN, B_MAX);
+      state.handleBOut_x = state.handleBIn_x + newB;
+    }
+    renderMeasureFigure();
+  }
+
+  function bindNudgeButtons() {
+    var HOLD_DELAY = 380, HOLD_INTERVAL = 90;
+    Array.prototype.forEach.call(document.querySelectorAll('.nudge-btn'), function (btn) {
+      var target = btn.getAttribute('data-nudge-target');
+      var dir = parseInt(btn.getAttribute('data-nudge-dir'), 10);
+      var startTimer = null, repeatTimer = null;
+      function stop() {
+        clearTimeout(startTimer);
+        clearInterval(repeatTimer);
+        startTimer = null;
+        repeatTimer = null;
+      }
+      btn.addEventListener('pointerdown', function (e) {
+        nudgeRuler(target, dir);
+        stop();
+        startTimer = setTimeout(function () {
+          repeatTimer = setInterval(function () { nudgeRuler(target, dir); }, HOLD_INTERVAL);
+        }, HOLD_DELAY);
+        e.preventDefault();
+      });
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (evt) {
+        btn.addEventListener(evt, stop);
+      });
+    });
+  }
+
+  /* ================================================================
+     GIRAR A RODA: trilho vertical (alternativa ao arrastar o pneu). Em vez
+     de um <input type="range"> nativo (cujo "thumb" saía descentralizado
+     em alguns navegadores/celulares e não dava pra corrigir só com CSS),
+     é uma div arrastável com posicionamento absoluto — sempre centralizada
+     porque é matemática simples (left:50%), não depende de como cada
+     motor de renderização desenha um range vertical.
+     ================================================================ */
+  function applyRotateTrackValue(v) {
+    v = clamp(v, -180, 180);
+    state.rotorAngleRaw = v;
+    el.wheelRotor.setAttribute('transform', 'rotate(' + v + ' ' + state.geom.cx + ' ' + state.geom.cy + ')');
+    updateLeds();
+    setRotateThumbPosition(v);
+  }
+
+  function rotateTrackValueFromClientY(clientY) {
+    var rect = el.rotateTrack.getBoundingClientRect();
+    if (!rect.height) return state.rotorAngleRaw;
+    var pct = (clientY - rect.top) / rect.height;
+    pct = clamp(pct, 0, 1);
+    // mesma convenção de setRotateThumbPosition: topo = +180, base = -180.
+    return 180 - pct * 360;
+  }
+
+  function bindRotateSlider() {
+    if (!el.rotateTrack) return;
+    el.rotateTrack.style.touchAction = 'none';
+
+    el.rotateTrack.addEventListener('pointerdown', function (e) {
+      if (state.spinning || el.rotateTrack.classList.contains('disabled')) return;
+      draggingRotateTrack = true;
+      try { el.rotateTrack.setPointerCapture(e.pointerId); } catch (_) {}
+      applyRotateTrackValue(rotateTrackValueFromClientY(e.clientY));
+      e.preventDefault();
+    });
+    el.rotateTrack.addEventListener('pointermove', function (e) {
+      if (!draggingRotateTrack) return;
+      applyRotateTrackValue(rotateTrackValueFromClientY(e.clientY));
+    });
+    function endDrag(e) {
+      if (!draggingRotateTrack) return;
+      draggingRotateTrack = false;
+      try { el.rotateTrack.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+    el.rotateTrack.addEventListener('pointerup', endDrag);
+    el.rotateTrack.addEventListener('pointercancel', endDrag);
+
+    el.rotateTrack.addEventListener('keydown', function (e) {
+      if (state.spinning || el.rotateTrack.classList.contains('disabled')) return;
+      var dir;
+      if (e.key === 'ArrowUp' || e.key === 'ArrowRight') dir = 1;
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') dir = -1;
+      else return;
+      e.preventDefault();
+      applyRotateTrackValue(rawAngleToSliderValue(state.rotorAngleRaw) + dir * 5);
+    });
   }
 
   /* ================================================================
@@ -1441,7 +1800,12 @@
     attachRotorDrag();
     bindBalancedModal();
     setMode('learn');
-    fitMachineReadout();
+
+    function refitForCurrentSize() {
+      fitMachineReadout();
+      updateSvgTextScale();
+    }
+    refitForCurrentSize();
 
     // A 1ª medida acontece antes da webfont (IBM Plex Mono, carregada via
     // Google Fonts) terminar de baixar — o texto é medido com a fonte de
@@ -1451,15 +1815,15 @@
     // fontes terminam de carregar (e de novo num pequeno atraso, para
     // navegadores sem a Font Loading API).
     if (window.document && document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(fitMachineReadout).catch(function () {});
+      document.fonts.ready.then(refitForCurrentSize).catch(function () {});
     }
-    setTimeout(fitMachineReadout, 350);
-    setTimeout(fitMachineReadout, 1200);
+    setTimeout(refitForCurrentSize, 350);
+    setTimeout(refitForCurrentSize, 1200);
 
     var resizeRaf = null;
     window.addEventListener('resize', function () {
       if (resizeRaf) cancelAnimationFrame(resizeRaf);
-      resizeRaf = requestAnimationFrame(fitMachineReadout);
+      resizeRaf = requestAnimationFrame(refitForCurrentSize);
     });
   }
 
