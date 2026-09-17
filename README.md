@@ -13,7 +13,7 @@ A tela abre com a roda **de lado**, do jeito que ela fica montada numa balancead
 - **Régua A** — sai da máquina até encostar na roda.
 - **Régua B** — embaixo da roda, com duas pontas (interna e externa).
 
-Arraste as réguas com o mouse (ou o dedo, no celular) até encostar na roda — a máquina calcula a medida em milímetros e o diâmetro do aro sozinha. Se preferir, dá pra digitar A, B e o diâmetro direto nos campos numéricos, sem arrastar nada.
+Arraste as réguas com o mouse (ou o dedo, no celular) até encostar na roda — a máquina calcula a medida em milímetros e o diâmetro do aro sozinha. Se preferir, dá pra digitar A, B (e a ponta interna de B) e o diâmetro direto nos campos numéricos, sem arrastar nada. Cada campo tem botões **−/+** ao lado para ajustar 1 mm por vez sem precisar arrastar — útil no celular, onde acertar o arraste no pixel certo é mais difícil; segure o botão pra repetir o ajuste automaticamente.
 
 ![Medição com as réguas A e B](screenshots/02-medicao.png)
 
@@ -30,7 +30,7 @@ Depois de girar, a roda vira **de frente** automaticamente. É nessa vista que v
 - **Amarelo (mover)** — o peso está certo, só falta girar a roda até o chumbo cair no lugar (as setas indicam pra que lado).
 - Os ícones **+** e **−** no topo/embaixo do anel marcam onde adicionar ou remover chumbo.
 
-Arraste o próprio pneu para girar a roda manualmente até as bolinhas do painel de Balanceamento acenderem todas — esse é o ponto de referência (12h) pra colocar o chumbo.
+Arraste o próprio pneu para girar a roda manualmente até as bolinhas do painel de Balanceamento acenderem todas — esse é o ponto de referência (12h) pra colocar o chumbo. Se preferir (ou estiver no celular), dá pra girar também pelo trilho vertical ao lado do desenho: arraste a bolinha vermelha pra cima/baixo até achar o mesmo ponto.
 
 ![Vista frontal com o diagrama de campo e os chumbos já colocados](screenshots/03-vista-frontal.png)
 
@@ -84,3 +84,5 @@ python3 -m http.server
 ---
 
 *Simulação didática — não reproduz o algoritmo interno de nenhuma balanceadora comercial.*
+
+> ⚠️ **Aviso:** este projeto (código e este README) foi desenvolvido com o auxílio de IA (Claude, da Anthropic).
